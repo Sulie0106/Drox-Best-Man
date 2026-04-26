@@ -1,18 +1,25 @@
 require("dotenv").config();
 const { 
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, 
-    ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder 
+    ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, 
+    TextInputStyle, StringSelectMenuBuilder, ChannelType, PermissionFlagsBits 
 } = require("discord.js");
-const ms = require("ms");
 
 const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.GuildMembers, GatewayIntentBits.MessageContent]
+    intents: [
+        GatewayIntentBits.Guilds, 
+        GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.GuildMembers, 
+        GatewayIntentBits.MessageContent
+    ]
 });
 
+// 🛠️ CONFIGURATION
 const OWNER_ID = "1453824331346874500";
 const DIGGING_CHANNEL_ID = "1497905935656554506";
 const BUILDING_CHANNEL_ID = "1497906110219288646";
-const ORDER_LOG_ID = process.env.ORDER_LOG_CHANNEL_ID;
+const TICKET_CATEGORY_ID = "1496950777275486429"; // <--- VUL DIT IN!
+const STAFF_ROLE_ID = "1496951778967683072";     // <--- VUL DIT IN!
 
 client.once("ready", () => console.log(`✅ Drox Services Online`));
 
@@ -26,21 +33,17 @@ client.on("interactionCreate", async (interaction) => {
         // DIGGING EMBED
         const digEmbed = new EmbedBuilder()
             .setTitle("🪏 Drox Digging Services")
-            .setDescription("Our professional digging team is ready for your project.")
-            .addFields(
-                { name: "💰 Rates", value: "• $900 per block digged\n• $850 per block placed in the air (Sky bases)\n• 7.5m for finding good cords" },
-                { name: "⚠️ Policy", value: "You pay **before** we start the dig out." }
-            )
+            .setDescription("💰 **Rates**\n• $900 per block digged\n• $850 per block placed in the air\n• 7.5m for good cords\n\n⚠️ **Policy**: You pay before we do the dig out.")
             .setColor("#964B00");
 
         const digRow = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId("open_digging_modal").setLabel("Order Digging").setStyle(ButtonStyle.Primary).setEmoji("⛏️")
+            new ButtonBuilder().setCustomId("open_digging_modal").setLabel("Request builder").setStyle(ButtonStyle.Primary).setEmoji("⛏️")
         );
 
         // BUILDING EMBED
         const buildEmbed = new EmbedBuilder()
             .setTitle("🧱 Drox Building Services")
-            .setDescription("Choose from our selection of premium farms and schematic services.")
+            .setDescription("Select a farm from the dropdown below to request a builder.")
             .setColor("#FFD700");
 
         const buildRow = new ActionRowBuilder().addComponents(
@@ -48,21 +51,14 @@ client.on("interactionCreate", async (interaction) => {
                 .setCustomId("select_build_service")
                 .setPlaceholder("Choose a farm or service...")
                 .addOptions([
-                    { label: "Building service", value: "General Building" },
-                    { label: "Kelp Farms", value: "Kelp Farms" },
                     { label: "Ikea v1 (264 smokers)", description: "55m", value: "Ikea v1" },
                     { label: "Ikea v2 (512 smokers)", description: "90m", value: "Ikea v2" },
-                    { label: "Ikea v3 (1024 smokers)", description: "145m", value: "Ikea v3" },
-                    { label: "Ikea v4 (2048 smokers)", description: "200m", value: "Ikea v4" },
                     { label: "Mauschu v1", description: "100m", value: "Mauschu v1" },
-                    { label: "Mauschu v4", description: "255m", value: "Mauschu v4" },
                     { label: "Mauschu v9", description: "650m", value: "Mauschu v9" },
                     { label: "Fire Azure v1", description: "180m", value: "Fire Azure v1" },
-                    { label: "Fire Azure v3", description: "650m", value: "Fire Azure v3" },
                     { label: "Lox v1", description: "50m", value: "Lox v1" },
-                    { label: "Lox v5", description: "230m", value: "Lox v5" },
-                    { label: "Mcds (240 smokers)", description: "75m", value: "Mcds farm" },
-                    { label: "Your Schematics", description: "Price Negotiable", value: "Custom Schematic" }
+                    { label: "Mcds farm", description: "75m", value: "Mcds farm" },
+                    { label: "Your Schematics", description: "Negotiable", value: "Custom Schematic" }
                 ])
         );
 
@@ -75,53 +71,55 @@ client.on("interactionCreate", async (interaction) => {
         } catch (e) { await interaction.editReply("❌ Error. Check channel IDs."); }
     }
 
-    // --- 2. BUTTON HANDLER (DIGGING) ---
+    // --- 2. TICKET CREATOR FUNCTION ---
+    async function createTicket(user, type, detail) {
+        const guild = user.guild;
+        const channelName = `${user.user.username}-pending-builder`;
+
+        const ticketChannel = await interaction.guild.channels.create({
+            name: channelName,
+            type: ChannelType.GuildText,
+            parent: TICKET_CATEGORY_ID,
+            permissionOverwrites: [
+                { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] }, // Hide for everyone
+                { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }, // Show to user
+                { id: STAFF_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] } // Show to staff
+            ]
+        });
+
+        if (type === "digging") {
+            await ticketChannel.send({
+                content: `<@${user.id}>\n\nYou want **${detail}** digged out\n\nAnd builder is digging this out soon!`
+            });
+        } else {
+            await ticketChannel.send({
+                content: `<@${user.id}>\n\nYou want the **${detail}**\n\nAn builder is coming soon!`
+            });
+        }
+        return ticketChannel;
+    }
+
+    // --- 3. MODAL HANDLER (DIGGING) ---
     if (interaction.isButton() && interaction.customId === "open_digging_modal") {
-        const modal = new ModalBuilder().setCustomId("modal_digging").setTitle("Digging Order");
-        const blockInput = new TextInputBuilder()
-            .setCustomId("dig_count")
-            .setLabel("How many blocks should we dig?")
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true);
-        
+        const modal = new ModalBuilder().setCustomId("modal_digging").setTitle("Digging Request");
+        const blockInput = new TextInputBuilder().setCustomId("dig_count").setLabel("How many blocks should we dig?").setStyle(TextInputStyle.Short).setRequired(true);
         modal.addComponents(new ActionRowBuilder().addComponents(blockInput));
         await interaction.showModal(modal);
     }
 
-    // --- 3. SELECT MENU HANDLER (BUILDING) ---
-    if (interaction.isStringSelectMenu() && interaction.customId === "select_build_service") {
-        const selected = interaction.values[0];
-        const logChan = await client.channels.fetch(ORDER_LOG_ID);
-        
-        const logEmbed = new EmbedBuilder()
-            .setTitle("🧱 NEW BUILDING ORDER")
-            .addFields(
-                { name: "Client", value: `${interaction.user.tag}` },
-                { name: "Service/Farm", value: selected }
-            )
-            .setColor("#FFD700")
-            .setTimestamp();
-
-        if (logChan) await logChan.send({ embeds: [logEmbed] });
-        await interaction.reply({ content: `✅ You have requested: **${selected}**. Staff will contact you soon!`, ephemeral: true });
-    }
-
-    // --- 4. MODAL SUBMIT (DIGGING) ---
     if (interaction.isModalSubmit() && interaction.customId === "modal_digging") {
         const count = interaction.fields.getTextInputValue("dig_count");
-        const logChan = await client.channels.fetch(ORDER_LOG_ID);
-        
-        const logEmbed = new EmbedBuilder()
-            .setTitle("⛏️ NEW DIGGING ORDER")
-            .addFields(
-                { name: "Client", value: `${interaction.user.tag}` },
-                { name: "Amount", value: `${count} blocks` }
-            )
-            .setColor("#964B00")
-            .setTimestamp();
+        await interaction.deferReply({ ephemeral: true });
+        const ticket = await createTicket(interaction.member, "digging", count);
+        await interaction.editReply(`✅ Ticket created: ${ticket}`);
+    }
 
-        if (logChan) await logChan.send({ embeds: [logEmbed] });
-        await interaction.reply({ content: "✅ Digging request submitted!", ephemeral: true });
+    // --- 4. SELECT MENU HANDLER (BUILDING) ---
+    if (interaction.isStringSelectMenu() && interaction.customId === "select_build_service") {
+        const selected = interaction.values[0];
+        await interaction.deferReply({ ephemeral: true });
+        const ticket = await createTicket(interaction.member, "building", selected);
+        await interaction.editReply(`✅ Ticket created: ${ticket}`);
     }
 });
 
