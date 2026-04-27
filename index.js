@@ -3,7 +3,7 @@ const {
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, 
     ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, 
     TextInputStyle, StringSelectMenuBuilder, ChannelType, PermissionFlagsBits, 
-    Partials 
+    Partials, MessageFlags 
 } = require("discord.js");
 const ms = require("ms");
 
@@ -18,7 +18,7 @@ const client = new Client({
     partials: [Partials.Channel, Partials.Message, Partials.User]
 });
 
-// 🛠️ --- CONFIGURATION (DON'T FORGET TO FILL THESE) ---
+// 🛠️ --- CONFIGURATION ---
 const OWNER_ID = "1453824331346874500";
 const DIGGING_CHANNEL_ID = "1497905935656554506";
 const BUILDING_CHANNEL_ID = "1497906110219288646";
@@ -38,10 +38,10 @@ client.on("interactionCreate", async (interaction) => {
         // 1. SLASH COMMANDS (OWNER ONLY)
         // ==========================================
         if (interaction.isChatInputCommand()) {
-            if (interaction.user.id !== OWNER_ID) return interaction.reply({ content: "❌ Owner only.", ephemeral: true });
+            if (interaction.user.id !== OWNER_ID) return interaction.reply({ content: "❌ Owner only.", flags: MessageFlags.Ephemeral });
 
             if (interaction.commandName === "setup_hub") {
-                await interaction.deferReply({ ephemeral: true });
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 
                 // --- DIGGING HUB ---
                 const digEmbed = new EmbedBuilder().setTitle("🪏 Drox Digging Services").setDescription("Rates:\n• $900/block dig\n• $850/block placed in air\n• 7.5m for good cords\n\n⚠️ Pay before we dig out.").setColor("#964B00");
@@ -125,7 +125,7 @@ client.on("interactionCreate", async (interaction) => {
         // ==========================================
         if (interaction.isButton()) {
             
-            // Digging Button (Opens form)
+            // Digging Button
             if (interaction.customId === "open_digging_modal") {
                 const modal = new ModalBuilder().setCustomId("modal_digging").setTitle("Digging Request");
                 const blockInput = new TextInputBuilder().setCustomId("dig_count").setLabel("How many blocks should we dig?").setStyle(TextInputStyle.Short).setRequired(true);
@@ -136,15 +136,15 @@ client.on("interactionCreate", async (interaction) => {
             // Giveaway Join
             if (interaction.customId === "join_gw") {
                 const data = activeGiveaways.get(interaction.message.id);
-                if (!data) return interaction.reply({ content: "Ended.", ephemeral: true });
+                if (!data) return interaction.reply({ content: "Ended.", flags: MessageFlags.Ephemeral });
                 if (!data.entrants.includes(interaction.user.id)) data.entrants.push(interaction.user.id);
-                return interaction.reply({ content: "✅ Entered!", ephemeral: true });
+                return interaction.reply({ content: "✅ Entered!", flags: MessageFlags.Ephemeral });
             }
 
             // Giveaway Claim (Winner Only)
             if (interaction.customId === "claim_gw_prize") {
                 const isWinner = interaction.message.embeds[0].description.includes(interaction.user.id);
-                if (!isWinner) return interaction.reply({ content: "❌ You did not win this giveaway!", ephemeral: true });
+                if (!isWinner) return interaction.reply({ content: "❌ You did not win this giveaway!", flags: MessageFlags.Ephemeral });
                 
                 const ticket = await interaction.guild.channels.create({
                     name: `claim-${interaction.user.username}`,
@@ -157,12 +157,12 @@ client.on("interactionCreate", async (interaction) => {
                     ]
                 });
                 await ticket.send(`🏆 <@${interaction.user.id}> is here to claim their prize from the giveaway!`);
-                return interaction.reply({ content: `✅ Ticket created: ${ticket}`, ephemeral: true });
+                return interaction.reply({ content: `✅ Ticket created: ${ticket}`, flags: MessageFlags.Ephemeral });
             }
 
             // Application Start
             if (interaction.customId === "start_app") {
-                await interaction.reply({ content: "📩 Check your DMs!", ephemeral: true });
+                await interaction.reply({ content: "📩 Check your DMs!", flags: MessageFlags.Ephemeral });
                 const dm = await interaction.user.createDM();
                 let answers = "";
                 for (const q of appQuestions) {
@@ -180,16 +180,21 @@ client.on("interactionCreate", async (interaction) => {
                 return dm.send("✅ Application Submitted!");
             }
 
-            // Application Accept/Deny
+            // Application Accept/Deny (FIXED THE CRASH HERE)
             if (interaction.customId.startsWith("app_")) {
-                if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.reply({ content: "Staff only.", ephemeral: true });
-                const [action, userId] = interaction.customId.split("_").slice(0, 2);
+                if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.reply({ content: "Staff only.", flags: MessageFlags.Ephemeral });
+                
+                // Parts will be: ["app", "accept", "123456789"]
+                const parts = interaction.customId.split("_");
+                const action = parts[1]; // "accept" or "deny"
+                const userId = parts[2]; // The actual user ID
+
                 const targetUser = await client.users.fetch(userId);
 
-                if (interaction.customId.includes("accept")) {
+                if (action === "accept") {
                     await targetUser.send("✅ **Congratulations!** Your application for Drox Services has been **Accepted**. Welcome to the team!");
                     await interaction.update({ content: `✅ Application **Accepted** by ${interaction.user.tag}`, components: [] });
-                } else {
+                } else if (action === "deny") {
                     await targetUser.send("❌ **Update:** Your application for Drox Services has been **Denied** at this time.");
                     await interaction.update({ content: `❌ Application **Denied** by ${interaction.user.tag}`, components: [] });
                 }
@@ -198,11 +203,11 @@ client.on("interactionCreate", async (interaction) => {
 
             // Ticket Controls
             if (interaction.customId === "claim_ticket") {
-                if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.reply({ content: "Staff only.", ephemeral: true });
+                if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.reply({ content: "Staff only.", flags: MessageFlags.Ephemeral });
                 return interaction.update({ content: `${interaction.message.content}\n\n👤 **Claimed by:** ${interaction.user}`, components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("close_ticket").setLabel("Close").setStyle(ButtonStyle.Danger))] });
             }
             if (interaction.customId === "close_ticket") {
-                if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.reply({ content: "Staff only.", ephemeral: true });
+                if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.reply({ content: "Staff only.", flags: MessageFlags.Ephemeral });
                 await interaction.reply("🔒 Closing ticket in 3 seconds...");
                 setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
                 return;
@@ -213,7 +218,7 @@ client.on("interactionCreate", async (interaction) => {
         // 3. SELECT MENUS (BUILDING)
         // ==========================================
         if (interaction.isStringSelectMenu() && interaction.customId === "select_build_service") {
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             const selected = interaction.values[0];
             const ticket = await interaction.guild.channels.create({
                 name: `${interaction.user.username}-pending-builder`,
@@ -234,7 +239,7 @@ client.on("interactionCreate", async (interaction) => {
         // 4. MODALS (DIGGING SUBMIT)
         // ==========================================
         if (interaction.isModalSubmit() && interaction.customId === "modal_digging") {
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             const count = interaction.fields.getTextInputValue("dig_count");
             const ticket = await interaction.guild.channels.create({
                 name: `${interaction.user.username}-pending-builder`,
@@ -254,9 +259,9 @@ client.on("interactionCreate", async (interaction) => {
     } catch (error) {
         console.error("Interaction Error:", error);
         if (interaction.replied || interaction.deferred) {
-            await interaction.followUp({ content: '❌ An error occurred processing this request. Please check the Bot console.', ephemeral: true }).catch(() => {});
+            await interaction.followUp({ content: '❌ An error occurred processing this request. Please check the Bot console.', flags: MessageFlags.Ephemeral }).catch(() => {});
         } else {
-            await interaction.reply({ content: '❌ An error occurred processing this request. Please check the Bot console.', ephemeral: true }).catch(() => {});
+            await interaction.reply({ content: '❌ An error occurred processing this request. Please check the Bot console.', flags: MessageFlags.Ephemeral }).catch(() => {});
         }
     }
 });
