@@ -18,7 +18,7 @@ const client = new Client({
     partials: [Partials.Channel, Partials.Message, Partials.User]
 });
 
-// 🛠️ --- CONFIGURATION (ALL IDS UPDATED) ---
+// 🛠️ --- CONFIGURATION ---
 const ADMIN_ROLE_ID = "1496951778967683072"; 
 const STAFF_ROLE_ID = "1496951778967683072"; 
 const TICKET_CATEGORY_ID = "1496950777275486429";
@@ -29,6 +29,7 @@ const APP_HUB_CHANNEL_ID = "1498193257212022835";
 const APP_LOG_CHANNEL_ID = "1496241235810189453";
 const GENERAL_TICKET_CHANNEL_ID = "1496891644895821865";
 const STAFF_MOVE_LOG_ID = "1498701312991297546";
+const STAFF_PANEL_CHANNEL_ID = "1498708753024028692"; 
 
 let appQuestions = ["Why do you want to join Drox?", "What is your experience?", "How active are you?"];
 const activeGiveaways = new Map();
@@ -39,7 +40,7 @@ const getTicketButtons = () => new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId("close_ticket").setLabel("Close").setStyle(ButtonStyle.Danger).setEmoji("🔒")
 );
 
-client.once("ready", () => console.log(`✅ Drox Services Bot is online and IDs are synced!`));
+client.once("ready", () => console.log(`✅ Drox Services Bot is online and fully synced!`));
 
 client.on("interactionCreate", async (interaction) => {
     try {
@@ -51,80 +52,83 @@ client.on("interactionCreate", async (interaction) => {
                 return interaction.reply({ content: "❌ Access Denied.", flags: MessageFlags.Ephemeral });
             }
 
-            // STAFF MOVE (PROMOTE/DEMOTE) - FIXED ERROR HERE
+            // STAFF MOVE (PROMOTE/DEMOTE)
             if (interaction.commandName === "staffmove") {
                 await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-                
-                const user = interaction.options.getUser("user");
-                const action = interaction.options.getString("type"); // "promote" or "demote"
-                const role = interaction.options.getRole("role");
-                const member = await interaction.guild.members.fetch(user.id);
+                try {
+                    const user = interaction.options.getUser("user");
+                    const action = interaction.options.getString("type");
+                    const role = interaction.options.getRole("role");
+                    const member = await interaction.guild.members.fetch(user.id);
 
-                if (action === "promote") {
-                    await member.roles.add(role);
-                } else {
-                    await member.roles.remove(role);
+                    if (action === "promote") await member.roles.add(role);
+                    else await member.roles.remove(role);
+
+                    const logChan = await client.channels.fetch(STAFF_MOVE_LOG_ID);
+                    const logEmbed = new EmbedBuilder()
+                        .setTitle("🛡️ Staff Movement")
+                        .setDescription(`**User:** ${user}\n**Action:** ${action.toUpperCase()}\n**Role:** ${role}\n**Moderator:** ${interaction.user}`)
+                        .setColor(action === "promote" ? "Green" : "Red").setTimestamp();
+                    
+                    await logChan.send({ embeds: [logEmbed] });
+                    return interaction.editReply(`✅ Successfully ${action}d ${user.tag}.`);
+                } catch (err) {
+                    return interaction.editReply(`❌ Failed. Check Bot hierarchy.`);
                 }
-
-                // Send to Staff Logs
-                const logChan = await client.channels.fetch(STAFF_MOVE_LOG_ID);
-                const logEmbed = new EmbedBuilder()
-                    .setTitle("🛡️ Staff Movement")
-                    .setDescription(`**User:** ${user}\n**Action:** ${action.toUpperCase()}\n**Role:** ${role}\n**Moderator:** ${interaction.user}`)
-                    .setColor(action === "promote" ? "Green" : "Red")
-                    .setTimestamp();
-                
-                await logChan.send({ embeds: [logEmbed] });
-                return interaction.editReply(`✅ Successfully ${action}d ${user.tag}.`);
             }
 
+            // SETUP ALL HUBS
             if (interaction.commandName === "setup_hub") {
                 await interaction.deferReply({ flags: MessageFlags.Ephemeral });
                 
-                // Digging
+                // 1. Digging
                 const digEmbed = new EmbedBuilder().setTitle("🪏 Digging Services").setDescription("Rates: $900/block dig, $850/block air.").setColor("#964B00");
                 const digRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("open_digging_modal").setLabel("Request").setStyle(ButtonStyle.Primary));
                 await (await client.channels.fetch(DIGGING_CHANNEL_ID)).send({ embeds: [digEmbed], components: [digRow] });
 
-                // Building
+                // 2. Building
                 const buildEmbed = new EmbedBuilder().setTitle("🧱 Building Services").setDescription("Select a farm below.").setColor("#FFD700");
                 const buildRow = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder().setCustomId("select_build_service").setPlaceholder("Choose a farm...")
                     .addOptions([
-                        { label: "Ikea v1", value: "Ikea v1" }, { label: "Ikea v2", value: "Ikea v2" }, { label: "Ikea v3", value: "Ikea v3" }, { label: "Ikea v4", value: "Ikea v4" },
-                        { label: "Intermidiate", value: "Intermidiate" }, { label: "Advanced", value: "Advanced" }, { label: "Mauschu v1", value: "Mauschu v1" },
-                        { label: "Mauschu v2", value: "Mauschu v2" }, { label: "Mauschu v3", value: "Mauschu v3" }, { label: "Mauschu v4", value: "Mauschu v4" },
-                        { label: "Mauschu v5", value: "Mauschu v5" }, { label: "Mauschu v6", value: "Mauschu v6" }, { label: "Mauschu v7", value: "Mauschu v7" },
-                        { label: "Mauschu v8", value: "Mauschu v8" }, { label: "Mauschu v9", value: "Mauschu v9" }, { label: "Fire Azure v1", value: "Fire Azure v1" },
-                        { label: "Fire Azure v2", value: "Fire Azure v2" }, { label: "Fire Azure v3", value: "Fire Azure v3" }, { label: "Lox v1", value: "Lox v1" },
-                        { label: "Lox v2", value: "Lox v2" }, { label: "Lox v3", value: "Lox v3" }, { label: "Lox v4", value: "Lox v4" }, { label: "Lox v5", value: "Lox v5" },
-                        { label: "Mcds 240", value: "Mcds farm" }, { label: "Custom", value: "Custom Schematic" }
+                        { label: "Ikea v1", value: "Ikea v1" }, { label: "Ikea v2", value: "Ikea v2" }, { label: "Ikea v3", value: "Ikea v3" },
+                        { label: "Advanced", value: "Advanced" }, { label: "Mauschu v1", value: "Mauschu v1" }, { label: "Mcds 240", value: "Mcds farm" }, { label: "Custom", value: "Custom Schematic" }
                     ])
                 );
                 await (await client.channels.fetch(BUILDING_CHANNEL_ID)).send({ embeds: [buildEmbed], components: [buildRow] });
 
-                // General Tickets
-                const ticketEmbed = new EmbedBuilder().setTitle("🎫 Drox Support Tickets").setDescription("Open a ticket for any of the following:").setColor("Blue");
+                // 3. General Tickets
+                const ticketEmbed = new EmbedBuilder().setTitle("🎫 Drox Support Tickets").setDescription("Open a ticket below:").setColor("Blue");
                 const ticketRow = new ActionRowBuilder().addComponents(
                     new StringSelectMenuBuilder().setCustomId("select_general_ticket").setPlaceholder("Choose ticket type...")
                     .addOptions([
                         { label: "Giveaways", emoji: "🎉", value: "Giveaway Support" },
                         { label: "Partnership", emoji: "🤝", value: "Partnership" },
-                        { label: "Market", emoji: "🛒", value: "Market" },
-                        { label: "Report", emoji: "🚫", value: "Report" },
                         { label: "Support", emoji: "🛠️", value: "General Support" }
                     ])
                 );
                 await (await client.channels.fetch(GENERAL_TICKET_CHANNEL_ID)).send({ embeds: [ticketEmbed], components: [ticketRow] });
 
-                // Apps
-                const appEmbed = new EmbedBuilder().setTitle("📝 Staff Apps").setDescription("Apply now!").setColor("Green");
+                // 4. Staff Apps
+                const appEmbed = new EmbedBuilder().setTitle("📝 Staff Apps").setDescription("Apply to join the team!").setColor("Green");
                 const appRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("start_app").setLabel("Apply Now").setStyle(ButtonStyle.Success));
                 await (await client.channels.fetch(APP_HUB_CHANNEL_ID)).send({ embeds: [appEmbed], components: [appRow] });
 
-                await interaction.editReply("✅ All hubs setup!");
+                // 5. NEW: Staff Management
+                const staffManageEmbed = new EmbedBuilder()
+                    .setTitle("👔 Staff Management")
+                    .setDescription("Use the buttons below to view rules or formally retire.")
+                    .setColor("DarkGrey");
+                const staffRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId("view_staff_rules").setLabel("Staff Rules").setStyle(ButtonStyle.Secondary).setEmoji("📜"),
+                    new ButtonBuilder().setCustomId("retire_staff").setLabel("Retire").setStyle(ButtonStyle.Danger).setEmoji("🚪")
+                );
+                await (await client.channels.fetch(STAFF_PANEL_CHANNEL_ID)).send({ embeds: [staffManageEmbed], components: [staffRow] });
+
+                await interaction.editReply("✅ All hubs (Service, Apps, and Staff Management) setup!");
             }
 
+            // GIVEAWAY CREATE
             if (interaction.commandName === "gwcreate") {
                 const prize = interaction.options.getString("prize");
                 const duration = ms(interaction.options.getString("time"));
@@ -147,10 +151,32 @@ client.on("interactionCreate", async (interaction) => {
         }
 
         // ==========================================
-        // 2. BUTTONS
+        // 2. BUTTON INTERACTIONS
         // ==========================================
         if (interaction.isButton()) {
             
+            // --- STAFF MANAGEMENT BUTTONS ---
+            if (interaction.customId === "view_staff_rules") {
+                const rulesEmbed = new EmbedBuilder()
+                    .setTitle("📜 Drox Official Staff Rules")
+                    .setDescription("1. **Professionalism**: Respect in tickets.\n2. **Activity**: Notify Admins of 48h+ leave.\n3. **Claiming**: Only claim if ready.\n4. **Honesty**: No fake reports.\n5. **Confidentiality**: No leaking client info.")
+                    .setColor("Blue").setFooter({ text: "Drox Services • Staff Only" });
+                return interaction.reply({ embeds: [rulesEmbed], flags: MessageFlags.Ephemeral });
+            }
+
+            if (interaction.customId === "retire_staff") {
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.editReply("❌ Not a staff member.");
+                try {
+                    await interaction.member.roles.remove(STAFF_ROLE_ID);
+                    const logChan = await client.channels.fetch(STAFF_MOVE_LOG_ID);
+                    const retireEmbed = new EmbedBuilder().setTitle("🚪 Staff Retirement").setDescription(`**User:** ${interaction.user} has formally retired.`).setColor("Orange").setTimestamp();
+                    await logChan.send({ embeds: [retireEmbed] });
+                    return interaction.editReply("✅ You have retired. Thank you!");
+                } catch (e) { return interaction.editReply("❌ Error removing role."); }
+            }
+
+            // --- TICKET SYSTEM ---
             if (interaction.customId === "claim_ticket") {
                 if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.reply({ content: "Staff only.", flags: MessageFlags.Ephemeral });
                 return interaction.update({ content: `${interaction.message.content}\n\n👤 **Claimed by:** ${interaction.user}`, components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("close_ticket").setLabel("Close").setStyle(ButtonStyle.Danger))] });
@@ -163,24 +189,7 @@ client.on("interactionCreate", async (interaction) => {
                 return;
             }
 
-            if (interaction.customId === "claim_gw_prize") {
-                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-                const isWinner = interaction.message.embeds[0].description.includes(interaction.user.id);
-                if (!isWinner) return interaction.editReply("❌ Not a winner!");
-
-                const ticket = await interaction.guild.channels.create({
-                    name: `claim-${interaction.user.username}`,
-                    type: ChannelType.GuildText, parent: TICKET_CATEGORY_ID,
-                    permissionOverwrites: [
-                        { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                        { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-                        { id: STAFF_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
-                    ]
-                });
-                await ticket.send({ content: `🏆 <@${interaction.user.id}> here to claim their prize!`, components: [getTicketButtons()] });
-                return interaction.editReply(`✅ Ticket: ${ticket}`);
-            }
-
+            // --- GIVEAWAYS ---
             if (interaction.customId === "join_gw") {
                 const data = activeGiveaways.get(interaction.message.id);
                 if (!data) return interaction.reply({ content: "Ended.", flags: MessageFlags.Ephemeral });
@@ -188,6 +197,7 @@ client.on("interactionCreate", async (interaction) => {
                 return interaction.reply({ content: "✅ Entered!", flags: MessageFlags.Ephemeral });
             }
 
+            // --- APPLICATIONS ---
             if (interaction.customId === "start_app") {
                 await interaction.reply({ content: "📩 Check DMs!", flags: MessageFlags.Ephemeral });
                 const dm = await interaction.user.createDM();
