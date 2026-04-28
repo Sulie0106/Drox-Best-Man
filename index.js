@@ -19,13 +19,13 @@ const client = new Client({
 });
 
 // 🛠️ --- CONFIGURATION ---
-const OWNER_ID = "1453824331346874500";
+const ADMIN_ROLE_ID = "1496951778967683072"; // Anyone with this role can run setup/giveaways/staffmove
 const DIGGING_CHANNEL_ID = "1497905935656554506";
 const BUILDING_CHANNEL_ID = "1497906110219288646";
 const APP_HUB_CHANNEL_ID = "1498193257212022835";
 const APP_LOG_CHANNEL_ID = "1496241235810189453";
-const TICKET_CATEGORY_ID = "1496950777275486429"; 
-const STAFF_ROLE_ID = "1496951778967683072";     
+const TICKET_CATEGORY_ID = "PASTE_CATEGORY_ID_HERE"; 
+const STAFF_ROLE_ID = "PASTE_STAFF_ROLE_ID_HERE";     
 
 let appQuestions = ["Why do you want to join Drox?", "What is your experience?", "How active are you?"];
 const activeGiveaways = new Map();
@@ -35,10 +35,16 @@ client.once("ready", () => console.log(`✅ Drox Services Bot is fully online an
 client.on("interactionCreate", async (interaction) => {
     try {
         // ==========================================
-        // 1. SLASH COMMANDS (OWNER ONLY)
+        // 1. SLASH COMMANDS (ADMIN ROLE ONLY)
         // ==========================================
         if (interaction.isChatInputCommand()) {
-            if (interaction.user.id !== OWNER_ID) return interaction.reply({ content: "❌ Owner only.", flags: MessageFlags.Ephemeral });
+            // Check if the user has the Admin Role
+            if (!interaction.member.roles.cache.has(ADMIN_ROLE_ID)) {
+                return interaction.reply({ 
+                    content: "❌ You don't have the required role to use this command.", 
+                    flags: MessageFlags.Ephemeral 
+                });
+            }
 
             if (interaction.commandName === "setup_hub") {
                 await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -118,13 +124,27 @@ client.on("interactionCreate", async (interaction) => {
                     activeGiveaways.delete(msg.id);
                 }, duration);
             }
+
+            if (interaction.commandName === "set_app_questions") {
+                const qs = [interaction.options.getString('q1'), interaction.options.getString('q2'), interaction.options.getString('q3'), interaction.options.getString('q4')].filter(q => q);
+                appQuestions = qs;
+                await interaction.reply(`✅ Updated questions: ${appQuestions.length}`);
+            }
+
+            if (interaction.commandName === "staffmove") {
+                const user = interaction.options.getUser("user");
+                const action = interaction.options.getString("type");
+                const role = interaction.options.getRole("role");
+                const member = await interaction.guild.members.fetch(user.id);
+                if (action === "promote") await member.roles.add(role); else await member.roles.remove(role);
+                await interaction.reply(`✅ ${action === "promote" ? "Promoted" : "Demoted"} ${user.tag}`);
+            }
         }
 
         // ==========================================
         // 2. BUTTONS
         // ==========================================
         if (interaction.isButton()) {
-            
             // Digging Button
             if (interaction.customId === "open_digging_modal") {
                 const modal = new ModalBuilder().setCustomId("modal_digging").setTitle("Digging Request");
@@ -180,14 +200,13 @@ client.on("interactionCreate", async (interaction) => {
                 return dm.send("✅ Application Submitted!");
             }
 
-            // Application Accept/Deny (FIXED THE CRASH HERE)
+            // Application Accept/Deny
             if (interaction.customId.startsWith("app_")) {
                 if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.reply({ content: "Staff only.", flags: MessageFlags.Ephemeral });
                 
-                // Parts will be: ["app", "accept", "123456789"]
                 const parts = interaction.customId.split("_");
-                const action = parts[1]; // "accept" or "deny"
-                const userId = parts[2]; // The actual user ID
+                const action = parts[1]; 
+                const userId = parts[2]; 
 
                 const targetUser = await client.users.fetch(userId);
 
@@ -258,11 +277,6 @@ client.on("interactionCreate", async (interaction) => {
 
     } catch (error) {
         console.error("Interaction Error:", error);
-        if (interaction.replied || interaction.deferred) {
-            await interaction.followUp({ content: '❌ An error occurred processing this request. Please check the Bot console.', flags: MessageFlags.Ephemeral }).catch(() => {});
-        } else {
-            await interaction.reply({ content: '❌ An error occurred processing this request. Please check the Bot console.', flags: MessageFlags.Ephemeral }).catch(() => {});
-        }
     }
 });
 
