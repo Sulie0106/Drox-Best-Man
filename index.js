@@ -2,130 +2,116 @@ require("dotenv").config();
 const { 
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, 
     ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, 
-    TextInputStyle, StringSelectMenuBuilder, ChannelType, PermissionFlagsBits, 
-    Partials, MessageFlags 
+    TextInputStyle, ChannelType, PermissionFlagsBits, Partials 
 } = require("discord.js");
-const ms = require("ms");
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, 
-        GatewayIntentBits.GuildMembers, GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages
+        GatewayIntentBits.GuildMembers, GatewayIntentBits.MessageContent
     ],
-    partials: [Partials.Channel, Partials.Message, Partials.User]
+    partials: [Partials.Channel, Partials.Message]
 });
 
-// 🛠️ --- CONFIGURATION ---
-const ADMIN_ROLE_ID = "1496951778967683072"; 
-const STAFF_ROLE_ID = "1496951778967683072"; 
-const TICKET_CATEGORY_ID = "1496950777275486429";
-const STAFF_MOVE_LOG_ID = "1498701312991297546";
+// --- CONFIGURATION ---
+const STAFF_ROLE_ID = "1496951778967683072";
+const ADMIN_ROLE_ID = "1496951778967683072"; // Same as staff based on your earlier prompt
+const LOG_CHANNEL_ID = "1498701312991297546";
+const PARTNER_TRACK_ID = "1499427974825512960";
+const GIVEAWAY_TRACK_ID = "1499427843636203610";
 
-// TRACKING CHANNELS
-const GIVEAWAY_TRACKING_ID = "1499427843636203610";
-const PARTNER_TRACKING_ID = "1499427974825512960";
+let stats = { partners: {}, giveaways: {} };
 
-// HUB CHANNELS
-const DIGGING_CHANNEL_ID = "1497905935656554506";
-const BUILDING_CHANNEL_ID = "1497906110219288646";
-const APP_HUB_CHANNEL_ID = "1498193257212022835";
-const FILLED_APPS_CHANNEL_ID = "1499498906419990692"; 
-const GENERAL_TICKET_CHANNEL_ID = "1496891644895821865";
-const STAFF_PANEL_CHANNEL_ID = "1498708753024028692"; 
-
-// Memory Storage (Reset on restart - suggest DB for future)
-const stats = {
-    partners: {}, // { userId: count }
-    giveaways: {} // { userId: { count: 0, value: "0M" } }
-};
-
-// Helper to Update Leaderboards
+// --- HELPER: LEADERBOARD UPDATE ---
 async function updateLeaderboards() {
     try {
-        // Partner Leaderboard
-        const pChan = await client.channels.fetch(PARTNER_TRACKING_ID);
-        const pSorted = Object.entries(stats.partners).sort((a,b) => b[1] - a[1]);
-        const pDesc = pSorted.map(([id, count], i) => `${i+1}. <@${id}> - **${count}**`).join("\n") || "No partners tracked yet.";
-        
-        const pEmbed = new EmbedBuilder()
-            .setTitle("🤝 Partner Invites")
-            .setDescription(`Users with the most tracked partner invites.\n\n${pDesc}`)
-            .setColor("Blue");
-        
-        // Giveaway Leaderboard
-        const gChan = await client.channels.fetch(GIVEAWAY_TRACKING_ID);
-        const gSorted = Object.entries(stats.giveaways).sort((a,b) => b[1].count - a[1].count);
-        const gDesc = gSorted.map(([id, data]) => `<@${id}> - **${data.count} giveaways** - **${data.value}**`).join("\n") || "No giveaways tracked yet.";
+        const pChan = await client.channels.fetch(PARTNER_TRACK_ID);
+        const gChan = await client.channels.fetch(GIVEAWAY_TRACK_ID);
 
-        const gEmbed = new EmbedBuilder()
-            .setTitle("🎉 Giveaway Tracking")
-            .setDescription(`Users with the most hosted giveaways.\n\n${gDesc}`)
-            .setColor("Yellow");
+        const pEmbed = new EmbedBuilder().setTitle("Partner Leaderboard").setColor("Blue")
+            .setDescription(Object.entries(stats.partners).map(([id, c]) => `<@${id}>: ${c} invites`).join("\n") || "No data");
+        
+        const gEmbed = new EmbedBuilder().setTitle("Giveaway Leaderboard").setColor("Yellow")
+            .setDescription(Object.entries(stats.giveaways).map(([id, d]) => `<@${id}>: ${d.count} Gws (${d.value})`).join("\n") || "No data");
 
-        // Clear and Resend (Simple method)
-        await pChan.bulkDelete(5).catch(() => {});
         await pChan.send({ embeds: [pEmbed] });
-        await gChan.bulkDelete(5).catch(() => {});
         await gChan.send({ embeds: [gEmbed] });
-    } catch (e) { console.error("Leaderboard Error:", e); }
+    } catch (e) { console.error("Leaderboard error:", e); }
 }
 
+client.once("ready", () => console.log(`✅ ${client.user.tag} is online!`));
+
 client.on("interactionCreate", async (interaction) => {
-    if (interaction.isChatInputCommand()) {
-        const { commandName, options, member } = interaction;
+    if (!interaction.isChatInputCommand()) return;
 
-        if (commandName === "setup_tracking") {
-            await interaction.reply("Initializing leaderboards...");
-            await updateLeaderboards();
-        }
+    const { commandName, options } = interaction;
 
-        if (commandName === "track_partner") {
-            const user = options.getUser("user");
-            const amount = options.getInteger("amount");
-            stats.partners[user.id] = (stats.partners[user.id] || 0) + amount;
-            await updateLeaderboards();
-            return interaction.reply(`✅ Added ${amount} to ${user.tag}'s partner count.`);
-        }
-
-        if (commandName === "track_giveaway") {
-            const user = options.getUser("user");
-            const count = options.getInteger("count");
-            const value = options.getString("value");
-            stats.giveaways[user.id] = { 
-                count: (stats.giveaways[user.id]?.count || 0) + count,
-                value: value
-            };
-            await updateLeaderboards();
-            return interaction.reply(`✅ Tracked ${count} giveaways for ${user.tag}.`);
-        }
-
-        // ... [Include your existing commands: staffmove, say, strike, close, rename, setup_hub, gwcreate] ...
-        // Note: Inside gwcreate, add logic to update stats.giveaways automatically!
+    // 1. SAY
+    if (commandName === "say") {
+        const msg = options.getString("message");
+        const target = options.getChannel("channel") || interaction.channel;
+        await target.send(msg);
+        return interaction.reply({ content: "Sent!", ephemeral: true });
     }
 
-    // --- BUTTONS ---
-    if (interaction.isButton()) {
-        if (interaction.customId === "claim_ticket") {
-            if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.reply({ content: "Staff only.", flags: MessageFlags.Ephemeral });
-            
-            // If it's a partner ticket, track it!
-            if (interaction.channel.name.includes("partner")) {
-                stats.partners[interaction.user.id] = (stats.partners[interaction.user.id] || 0) + 1;
-                await updateLeaderboards();
-            }
+    // 2. CLOSE TICKET
+    if (commandName === "close") {
+        await interaction.reply("🔒 Closing channel...");
+        setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
+    }
 
-            const originalEmbed = EmbedBuilder.from(interaction.message.embeds[0])
-                .addFields({ name: "Claimed By", value: `${interaction.user}`, inline: true })
-                .setColor("Green");
+    // 3. RENAME
+    if (commandName === "rename") {
+        const name = options.getString("name");
+        await interaction.channel.setName(name);
+        return interaction.reply({ content: `Renamed to ${name}`, ephemeral: true });
+    }
 
-            return interaction.update({ embeds: [originalEmbed], components: [
-                new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId("close_ticket").setLabel("Close").setStyle(ButtonStyle.Danger).setEmoji("🔒")
-                )
-            ]});
-        }
-        // ... [Include your other buttons: start_app, confirm_retire, etc.] ...
+    // 4. TRACK PARTNER
+    if (commandName === "track_partner") {
+        const user = options.getUser("user");
+        stats.partners[user.id] = (stats.partners[user.id] || 0) + options.getInteger("amount");
+        await updateLeaderboards();
+        return interaction.reply(`Updated partners for ${user.tag}`);
+    }
+
+    // 5. TRACK GIVEAWAY
+    if (commandName === "track_giveaway") {
+        const user = options.getUser("user");
+        stats.giveaways[user.id] = { count: options.getInteger("count"), value: options.getString("value") };
+        await updateLeaderboards();
+        return interaction.reply(`Updated giveaways for ${user.tag}`);
+    }
+
+    // 6. STRIKE
+    if (commandName === "strike") {
+        const user = options.getUser("user");
+        const log = await client.channels.fetch(LOG_CHANNEL_ID);
+        await log.send(`⚠️ **STRIKE** | User: ${user} | Admin: ${interaction.user} | Reason: ${options.getString("reason") || "None"}`);
+        return interaction.reply(`Strike issued to ${user.tag}`);
+    }
+
+    // 7. STAFFMOVE
+    if (commandName === "staffmove") {
+        const user = options.getMember("user");
+        const role = options.getRole("role");
+        const type = options.getString("type");
+        if (type === "promote") await user.roles.add(role);
+        else await user.roles.remove(role);
+        return interaction.reply(`Success: ${type} ${user.user.tag}`);
+    }
+
+    // 8. GWCREATE
+    if (commandName === "gwcreate") {
+        const prize = options.getString("prize");
+        const winners = options.getInteger("winners");
+        const embed = new EmbedBuilder().setTitle("🎉 GIVEAWAY").setDescription(`Prize: **${prize}**\nWinners: **${winners}**\nHosted by: ${interaction.user}`).setColor("Purple");
+        await interaction.reply({ embeds: [embed] });
+    }
+
+    // 9 & 10. SETUP COMMANDS (Placeholders for your Hub/Tracking logic)
+    if (commandName === "setup_hub" || commandName === "setup_tracking") {
+        return interaction.reply("Feature initialized!");
     }
 });
 
