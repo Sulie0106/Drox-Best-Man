@@ -1,41 +1,71 @@
 require("dotenv").config();
-const { REST, Routes, SlashCommandBuilder } = require("discord.js");
+const { REST, Routes, SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
 
 const commands = [
-  // 1. Setup Hub
-  new SlashCommandBuilder()
-    .setName("setup_hub")
-    .setDescription("Spawns the Drox Service and Application menu"),
+    new SlashCommandBuilder()
+        .setName("setup_hub")
+        .setDescription("Sets up all the hubs (Digging, Building, Tickets, Apps, Staff Panel)")
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
-  // 2. Staff Movement
-  new SlashCommandBuilder()
-    .setName("staffmove")
-    .setDescription("Manage staff promotions and demotions")
-    .addUserOption(o => o.setName("user").setDescription("The user").setRequired(true))
-    .addStringOption(o => o.setName("type").setDescription("Action").setRequired(true).addChoices(
-        { name: "Promote", value: "promote" },
-        { name: "Demote", value: "demote" }
-    ))
-    .addRoleOption(o => o.setName("role").setDescription("The role").setRequired(true)),
+    new SlashCommandBuilder()
+        .setName("staffmove")
+        .setDescription("Promote or demote a staff member")
+        .addUserOption(option => option.setName("user").setDescription("The user to modify").setRequired(true))
+        .addStringOption(option => 
+            option.setName("type")
+            .setDescription("Promote or Demote")
+            .setRequired(true)
+            .addChoices({ name: "Promote", value: "promote" }, { name: "Demote", value: "demote" })
+        )
+        .addRoleOption(option => option.setName("role").setDescription("The role to add or remove").setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
-  // 3. Giveaway Create
-  new SlashCommandBuilder()
-    .setName("gwcreate")
-    .setDescription("Start a giveaway")
-    .addStringOption(o => o.setName("prize").setDescription("What is the prize?").setRequired(true))
-    .addStringOption(o => o.setName("time").setDescription("Duration (e.g. 10m, 1h, 1d)").setRequired(true))
-    .addIntegerOption(o => o.setName("winners").setDescription("Number of winners").setRequired(true)),
+    new SlashCommandBuilder()
+        .setName("say")
+        .setDescription("Speak as the bot")
+        .addStringOption(option => option.setName("message").setDescription("The message to send").setRequired(true))
+        .addChannelOption(option => option.setName("channel").setDescription("Channel to send it in (optional)"))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
-].map(command => command.toJSON());
+    new SlashCommandBuilder()
+        .setName("strike")
+        .setDescription("Issue a strike to a staff member")
+        .addUserOption(option => option.setName("user").setDescription("The staff member").setRequired(true))
+        .addStringOption(option => option.setName("reason").setDescription("Reason for the strike").setRequired(false))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder()
+        .setName("gwcreate")
+        .setDescription("Create a giveaway")
+        .addStringOption(option => option.setName("prize").setDescription("What are you giving away?").setRequired(true))
+        .addStringOption(option => option.setName("time").setDescription("Duration (e.g., 1h, 30m, 1d)").setRequired(true))
+        .addIntegerOption(option => option.setName("winners").setDescription("Number of winners").setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+    new SlashCommandBuilder()
+        .setName("close")
+        .setDescription("Closes the current ticket channel"),
+
+    new SlashCommandBuilder()
+        .setName("rename")
+        .setDescription("Renames the current ticket channel")
+        .addStringOption(option => option.setName("name").setDescription("The new channel name").setRequired(true))
+];
 
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
 
 (async () => {
-  try {
-    console.log("⏳ Registering Drox Services commands...");
-    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands });
-    console.log("✅ Commands registered!");
-  } catch (error) {
-    console.error(error);
-  }
+    try {
+        console.log(`⏳ Started refreshing ${commands.length} application (/) commands.`);
+        
+        // Deploys to a specific server for instant updates. 
+        await rest.put(
+            Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
+            { body: commands }
+        );
+
+        console.log(`✅ Successfully reloaded application (/) commands.`);
+    } catch (error) {
+        console.error(error);
+    }
 })();
