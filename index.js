@@ -2,7 +2,8 @@ require("dotenv").config();
 const { 
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, 
     ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, 
-    TextInputStyle, ChannelType, PermissionFlagsBits, Partials 
+    TextInputStyle, StringSelectMenuBuilder, ChannelType, PermissionFlagsBits, 
+    Partials, MessageFlags 
 } = require("discord.js");
 const ms = require("ms");
 
@@ -11,184 +12,266 @@ const client = new Client({
         GatewayIntentBits.Guilds, 
         GatewayIntentBits.GuildMessages, 
         GatewayIntentBits.GuildMembers, 
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.DirectMessages
     ],
-    partials: [Partials.Channel, Partials.Message]
+    partials: [Partials.Channel, Partials.Message, Partials.User]
 });
 
-// --- CONFIGURATION (Ensure these match your server) ---
-const STAFF_ROLE_ID = "1496951778967683072";
-const ADMIN_ROLE_ID = "1496951778967683072";
+// 🛠️ --- CONFIGURATION ---
+const ADMIN_ROLE_ID = "1496951778967683072"; 
+const STAFF_ROLE_ID = "1496951778967683072"; 
 const TICKET_CATEGORY_ID = "1496950777275486429";
-const LOG_CHANNEL_ID = "1498701312991297546";
-const PARTNER_TRACK_ID = "1499427974825512960";
-const GW_TRACK_ID = "1499427843636203610";
 
-// In-memory database (Resets if bot restarts - use a JSON file or DB for permanent storage)
-let stats = { partners: {}, giveaways: {} };
+const DIGGING_CHANNEL_ID = "1497905935656554506";
+const BUILDING_CHANNEL_ID = "1497906110219288646";
+const APP_HUB_CHANNEL_ID = "1498193257212022835";
+const APP_LOG_CHANNEL_ID = "1496241235810189453";
+const GENERAL_TICKET_CHANNEL_ID = "1496891644895821865";
+const STAFF_MOVE_LOG_ID = "1498701312991297546";
+const STAFF_PANEL_CHANNEL_ID = "1498708753024028692"; 
 
-client.once("ready", () => {
-    console.log(`✅ ${client.user.tag} is online and fully loaded!`);
-});
+let appQuestions = ["Why do you want to join Drox?", "What is your experience?", "How active are you?"];
+const activeGiveaways = new Map();
+
+// Helper for Ticket Buttons
+const getTicketButtons = () => new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("claim_ticket").setLabel("Claim").setStyle(ButtonStyle.Success).setEmoji("🙋‍♂️"),
+    new ButtonBuilder().setCustomId("close_ticket").setLabel("Close").setStyle(ButtonStyle.Danger).setEmoji("🔒")
+);
+
+client.once("ready", () => console.log(`✅ Drox Services Bot is online and fully synced!`));
 
 client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
+    try {
+        // ==========================================
+        // 1. SLASH COMMANDS
+        // ==========================================
+        if (interaction.isChatInputCommand()) {
+            if (!interaction.member.roles.cache.has(ADMIN_ROLE_ID)) {
+                return interaction.reply({ content: "❌ Access Denied.", flags: MessageFlags.Ephemeral });
+            }
 
-    const { commandName, options } = interaction;
+            // STAFF MOVE (PROMOTE/DEMOTE)
+            if (interaction.commandName === "staffmove") {
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                try {
+                    const user = interaction.options.getUser("user");
+                    const action = interaction.options.getString("type");
+                    const role = interaction.options.getRole("role");
+                    const member = await interaction.guild.members.fetch(user.id);
 
-    // 1. SAY COMMAND
-    if (commandName === "say") {
-        const msg = options.getString("message");
-        const target = options.getChannel("channel") || interaction.channel;
-        await target.send(msg);
-        return interaction.reply({ content: "Message sent.", ephemeral: true });
-    }
+                    if (action === "promote") await member.roles.add(role);
+                    else await member.roles.remove(role);
 
-    // 2. STRIKE SYSTEM
-    if (commandName === "strike") {
-        const user = options.getUser("user");
-        const reason = options.getString("reason") || "No reason provided.";
-        const logChan = await client.channels.fetch(LOG_CHANNEL_ID);
-        
-        const strikeEmbed = new EmbedBuilder()
-            .setTitle("⚠️ Staff Strike Issued")
-            .addFields(
-                { name: "Staff Member", value: `${user}`, inline: true },
-                { name: "Issued By", value: `${interaction.user}`, inline: true },
-                { name: "Reason", value: reason }
-            )
-            .setColor("Red")
-            .setTimestamp();
+                    const logChan = await client.channels.fetch(STAFF_MOVE_LOG_ID);
+                    const logEmbed = new EmbedBuilder()
+                        .setTitle("🛡️ Staff Movement")
+                        .setDescription(`**User:** ${user}\n**Action:** ${action.toUpperCase()}\n**Role:** ${role}\n**Moderator:** ${interaction.user}`)
+                        .setColor(action === "promote" ? "Green" : "Red").setTimestamp();
+                    
+                    await logChan.send({ embeds: [logEmbed] });
+                    return interaction.editReply(`✅ Successfully ${action}d ${user.tag}.`);
+                } catch (err) {
+                    return interaction.editReply(`❌ Failed. Check Bot hierarchy.`);
+                }
+            }
 
-        await logChan.send({ embeds: [strikeEmbed] });
-        return interaction.reply(`Successfully issued a strike to ${user.tag}.`);
-    }
+            // SETUP ALL HUBS
+            if (interaction.commandName === "setup_hub") {
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                
+                // 1. Digging
+                const digEmbed = new EmbedBuilder().setTitle("🪏 Digging Services").setDescription("Rates: $900/block dig, $850/block air.").setColor("#964B00");
+                const digRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("open_digging_modal").setLabel("Request").setStyle(ButtonStyle.Primary));
+                await (await client.channels.fetch(DIGGING_CHANNEL_ID)).send({ embeds: [digEmbed], components: [digRow] });
 
-    // 3. PARTNER TRACKING
-    if (commandName === "track_partner") {
-        const user = options.getUser("user");
-        const amount = options.getInteger("amount");
-        
-        stats.partners[user.id] = (stats.partners[user.id] || 0) + amount;
-        
-        const trackChan = await client.channels.fetch(PARTNER_TRACK_ID);
-        const embed = new EmbedBuilder()
-            .setTitle("🤝 Partner Update")
-            .setDescription(`${user} has completed a partnership!`)
-            .addFields(
-                { name: "New Total", value: `${stats.partners[user.id]}`, inline: true },
-                { name: "Added", value: `${amount}`, inline: true }
-            )
-            .setColor("Blue");
+                // 2. Building
+                const buildEmbed = new EmbedBuilder().setTitle("🧱 Building Services").setDescription("Select a farm below.").setColor("#FFD700");
+                const buildRow = new ActionRowBuilder().addComponents(
+                    new StringSelectMenuBuilder().setCustomId("select_build_service").setPlaceholder("Choose a farm...")
+                    .addOptions([
+                        { label: "Ikea v1", value: "Ikea v1" }, { label: "Ikea v2", value: "Ikea v2" }, { label: "Ikea v3", value: "Ikea v3" },
+                        { label: "Advanced", value: "Advanced" }, { label: "Mauschu v1", value: "Mauschu v1" }, { label: "Mcds 240", value: "Mcds farm" }, { label: "Custom", value: "Custom Schematic" }
+                    ])
+                );
+                await (await client.channels.fetch(BUILDING_CHANNEL_ID)).send({ embeds: [buildEmbed], components: [buildRow] });
 
-        await trackChan.send({ embeds: [embed] });
-        return interaction.reply(`Tracked ${amount} for ${user.tag}.`);
-    }
+                // 3. General Tickets
+                const ticketEmbed = new EmbedBuilder().setTitle("🎫 Drox Support Tickets").setDescription("Open a ticket below:").setColor("Blue");
+                const ticketRow = new ActionRowBuilder().addComponents(
+                    new StringSelectMenuBuilder().setCustomId("select_general_ticket").setPlaceholder("Choose ticket type...")
+                    .addOptions([
+                        { label: "Giveaways", emoji: "🎉", value: "Giveaway Support" },
+                        { label: "Partnership", emoji: "🤝", value: "Partnership" },
+                        { label: "Support", emoji: "🛠️", value: "General Support" }
+                    ])
+                );
+                await (await client.channels.fetch(GENERAL_TICKET_CHANNEL_ID)).send({ embeds: [ticketEmbed], components: [ticketRow] });
 
-    // 4. GIVEAWAY TRACKING
-    if (commandName === "track_giveaway") {
-        const user = options.getUser("user");
-        const count = options.getInteger("count");
-        const value = options.getString("value");
+                // 4. Staff Apps
+                const appEmbed = new EmbedBuilder().setTitle("📝 Staff Apps").setDescription("Apply to join the team!").setColor("Green");
+                const appRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("start_app").setLabel("Apply Now").setStyle(ButtonStyle.Success));
+                await (await client.channels.fetch(APP_HUB_CHANNEL_ID)).send({ embeds: [appEmbed], components: [appRow] });
 
-        stats.giveaways[user.id] = { 
-            count: (stats.giveaways[user.id]?.count || 0) + count, 
-            value: value 
-        };
+                // 5. NEW: Staff Management
+                const staffManageEmbed = new EmbedBuilder()
+                    .setTitle("👔 Staff Management")
+                    .setDescription("Use the buttons below to view rules or formally retire.")
+                    .setColor("DarkGrey");
+                const staffRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId("view_staff_rules").setLabel("Staff Rules").setStyle(ButtonStyle.Secondary).setEmoji("📜"),
+                    new ButtonBuilder().setCustomId("retire_staff").setLabel("Retire").setStyle(ButtonStyle.Danger).setEmoji("🚪")
+                );
+                await (await client.channels.fetch(STAFF_PANEL_CHANNEL_ID)).send({ embeds: [staffManageEmbed], components: [staffRow] });
 
-        const gwChan = await client.channels.fetch(GW_TRACK_ID);
-        const embed = new EmbedBuilder()
-            .setTitle("🎉 Giveaway Tracked")
-            .addFields(
-                { name: "Host", value: `${user}`, inline: true },
-                { name: "Total Hosted", value: `${stats.giveaways[user.id].count}`, inline: true },
-                { name: "Total Value", value: value }
-            )
-            .setColor("Yellow");
+                await interaction.editReply("✅ All hubs (Service, Apps, and Staff Management) setup!");
+            }
 
-        await gwChan.send({ embeds: [embed] });
-        return interaction.reply(`Logged giveaway for ${user.tag}.`);
-    }
+            // GIVEAWAY CREATE
+            if (interaction.commandName === "gwcreate") {
+                const prize = interaction.options.getString("prize");
+                const duration = ms(interaction.options.getString("time"));
+                const winners = interaction.options.getInteger("winners");
+                const endTime = Math.floor((Date.now() + duration) / 1000);
+                
+                const embed = new EmbedBuilder().setTitle("🎉 GIVEAWAY").setDescription(`Prize: **${prize}**\nEnds: <t:${endTime}:R>`).setColor("Gold");
+                const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("join_gw").setLabel("Join!").setStyle(ButtonStyle.Primary));
 
-    // 5. TICKET MANAGEMENT (Close/Rename)
-    if (commandName === "close") {
-        await interaction.reply("🔒 Ticket will close in 5 seconds...");
-        setTimeout(() => interaction.channel.delete().catch(() => {}), 5000);
-    }
+                const msg = await interaction.reply({ embeds: [embed], components: [row], fetchReply: true });
+                activeGiveaways.set(msg.id, { prize, winners, entrants: [] });
 
-    if (commandName === "rename") {
-        const newName = options.getString("name");
-        await interaction.channel.setName(newName);
-        return interaction.reply(`Channel renamed to ${newName}`);
-    }
+                setTimeout(async () => {
+                    const data = activeGiveaways.get(msg.id);
+                    const winnerList = data.entrants.sort(() => 0.5 - Math.random()).slice(0, data.winners);
+                    const endEmbed = new EmbedBuilder().setTitle("🎊 ENDED").setDescription(`Prize: **${prize}**\nWinners: ${winnerList.length ? winnerList.map(id => `<@${id}>`).join(", ") : "None"}`).setColor("Grey");
+                    await msg.edit({ embeds: [endEmbed], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("claim_gw_prize").setLabel("Claim Prize").setStyle(ButtonStyle.Success))] });
+                }, duration);
+            }
+        }
 
-    // 6. GIVEAWAY CREATION (Live)
-    if (commandName === "gwcreate") {
-        const prize = options.getString("prize");
-        const time = options.getString("time");
-        const winners = options.getInteger("winners");
-
-        const duration = ms(time);
-        if (!duration) return interaction.reply("Invalid time format (use 1h, 1d, etc).");
-
-        const embed = new EmbedBuilder()
-            .setTitle("🎊 NEW GIVEAWAY 🎊")
-            .setDescription(`**Prize:** ${prize}\n**Winners:** ${winners}\n**Ends in:** ${time}`)
-            .setFooter({ text: `Hosted by ${interaction.user.tag}` })
-            .setColor("Purple")
-            .setTimestamp();
-
-        const msg = await interaction.reply({ embeds: [embed], fetchReply: true });
-        await msg.react("🎉");
-
-        setTimeout(async () => {
-            const reaction = msg.reactions.cache.get("🎉");
-            const users = await reaction.users.fetch();
-            const entries = users.filter(u => !u.bot).map(u => u);
+        // ==========================================
+        // 2. BUTTON INTERACTIONS
+        // ==========================================
+        if (interaction.isButton()) {
             
-            if (entries.length === 0) return interaction.followUp("No one entered the giveaway.");
-            
-            const picked = entries.sort(() => 0.5 - Math.random()).slice(0, winners);
-            interaction.followUp(`🎉 Congratulations ${picked.join(", ")}! You won the **${prize}**!`);
-        }, duration);
-    }
+            // --- STAFF MANAGEMENT BUTTONS ---
+            if (interaction.customId === "view_staff_rules") {
+                const rulesEmbed = new EmbedBuilder()
+                    .setTitle("📜 Drox Official Staff Rules")
+                    .setDescription("1. **Professionalism**: Respect in tickets.\n2. **Activity**: Notify Admins of 48h+ leave.\n3. **Claiming**: Only claim if ready.\n4. **Honesty**: No fake reports.\n5. **Confidentiality**: No leaking client info.")
+                    .setColor("Blue").setFooter({ text: "Drox Services • Staff Only" });
+                return interaction.reply({ embeds: [rulesEmbed], flags: MessageFlags.Ephemeral });
+            }
 
-    // 7. HUB SPAWNER (Manual trigger)
-    if (commandName === "setup_hub") {
-        const embed = new EmbedBuilder()
-            .setTitle("Drox Service Hub")
-            .setDescription("Click a button below to open a ticket or apply!")
-            .setColor("DarkButNotBlack");
+            if (interaction.customId === "retire_staff") {
+                await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+                if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.editReply("❌ Not a staff member.");
+                try {
+                    await interaction.member.roles.remove(STAFF_ROLE_ID);
+                    const logChan = await client.channels.fetch(STAFF_MOVE_LOG_ID);
+                    const retireEmbed = new EmbedBuilder().setTitle("🚪 Staff Retirement").setDescription(`**User:** ${interaction.user} has formally retired.`).setColor("Orange").setTimestamp();
+                    await logChan.send({ embeds: [retireEmbed] });
+                    return interaction.editReply("✅ You have retired. Thank you!");
+                } catch (e) { return interaction.editReply("❌ Error removing role."); }
+            }
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId("open_service").setLabel("Services").setStyle(ButtonStyle.Primary),
-            new ButtonBuilder().setCustomId("open_apply").setLabel("Apply Now").setStyle(ButtonStyle.Success)
-        );
+            // --- TICKET SYSTEM ---
+            if (interaction.customId === "claim_ticket") {
+                if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.reply({ content: "Staff only.", flags: MessageFlags.Ephemeral });
+                return interaction.update({ content: `${interaction.message.content}\n\n👤 **Claimed by:** ${interaction.user}`, components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("close_ticket").setLabel("Close").setStyle(ButtonStyle.Danger))] });
+            }
 
-        await interaction.channel.send({ embeds: [embed], components: [row] });
-        return interaction.reply({ content: "Hub Spawned.", ephemeral: true });
-    }
-});
+            if (interaction.customId === "close_ticket") {
+                if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.reply({ content: "Staff only.", flags: MessageFlags.Ephemeral });
+                await interaction.reply("🔒 Closing...");
+                setTimeout(() => interaction.channel.delete().catch(() => {}), 2000);
+                return;
+            }
 
-// --- BUTTON LISTENER FOR TICKET CREATION ---
-client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isButton()) return;
+            // --- GIVEAWAYS ---
+            if (interaction.customId === "join_gw") {
+                const data = activeGiveaways.get(interaction.message.id);
+                if (!data) return interaction.reply({ content: "Ended.", flags: MessageFlags.Ephemeral });
+                if (!data.entrants.includes(interaction.user.id)) data.entrants.push(interaction.user.id);
+                return interaction.reply({ content: "✅ Entered!", flags: MessageFlags.Ephemeral });
+            }
 
-    if (interaction.customId === "open_service") {
-        const ticket = await interaction.guild.channels.create({
-            name: `service-${interaction.user.username}`,
-            type: ChannelType.GuildText,
-            parent: TICKET_CATEGORY_ID,
-            permissionOverwrites: [
-                { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-                { id: STAFF_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
-            ]
-        });
+            // --- APPLICATIONS ---
+            if (interaction.customId === "start_app") {
+                await interaction.reply({ content: "📩 Check DMs!", flags: MessageFlags.Ephemeral });
+                const dm = await interaction.user.createDM();
+                let answers = "";
+                for (const q of appQuestions) {
+                    await dm.send(`**${q}**`);
+                    const msg = await dm.awaitMessages({ max: 1, time: 300000 }).then(c => c.first().content).catch(() => null);
+                    if (!msg) return;
+                    answers += `**${q}**\n${msg}\n\n`;
+                }
+                const logChan = await client.channels.fetch(APP_LOG_CHANNEL_ID);
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(`app_accept_${interaction.user.id}`).setLabel("Accept").setStyle(ButtonStyle.Success),
+                    new ButtonBuilder().setCustomId(`app_deny_${interaction.user.id}`).setLabel("Deny").setStyle(ButtonStyle.Danger)
+                );
+                await logChan.send({ content: `📝 **App from ${interaction.user.tag}**\n\n${answers}`, components: [row] });
+                return dm.send("✅ Submitted!");
+            }
 
-        await ticket.send(`Welcome ${interaction.user}, staff will be with you shortly.`);
-        return interaction.reply({ content: `Ticket created: ${ticket}`, ephemeral: true });
-    }
+            if (interaction.customId.startsWith("app_")) {
+                const [_, action, userId] = interaction.customId.split("_");
+                const targetUser = await client.users.fetch(userId);
+                if (action === "accept") {
+                    await targetUser.send("✅ Accepted!");
+                    await interaction.update({ content: `✅ Accepted by ${interaction.user.tag}`, components: [] });
+                } else {
+                    await targetUser.send("❌ Denied.");
+                    await interaction.update({ content: `❌ Denied by ${interaction.user.tag}`, components: [] });
+                }
+            }
+
+            if (interaction.customId === "open_digging_modal") {
+                const modal = new ModalBuilder().setCustomId("modal_digging").setTitle("Dig Request");
+                const input = new TextInputBuilder().setCustomId("dig_count").setLabel("Count?").setStyle(TextInputStyle.Short);
+                modal.addComponents(new ActionRowBuilder().addComponents(input));
+                return await interaction.showModal(modal);
+            }
+        }
+
+        // ==========================================
+        // 3. SELECT MENUS & MODALS
+        // ==========================================
+        if (interaction.isStringSelectMenu()) {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            const val = interaction.values[0];
+            const ticket = await interaction.guild.channels.create({
+                name: `${val.replace(/\s+/g, '-').toLowerCase()}-${interaction.user.username}`,
+                type: ChannelType.GuildText, parent: TICKET_CATEGORY_ID,
+                permissionOverwrites: [
+                    { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+                    { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+                    { id: STAFF_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+                ]
+            });
+            await ticket.send({ content: `<@${interaction.user.id}> opened a **${val}** ticket.`, components: [getTicketButtons()] });
+            return interaction.editReply(`✅ Ticket: ${ticket}`);
+        }
+
+        if (interaction.isModalSubmit() && interaction.customId === "modal_digging") {
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            const ticket = await interaction.guild.channels.create({
+                name: `digging-${interaction.user.username}`,
+                type: ChannelType.GuildText, parent: TICKET_CATEGORY_ID,
+                permissionOverwrites: [
+                    { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+                    { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+                    { id: STAFF_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+                ]
+            });
+            await ticket.send({ content: `<@${interaction.user.id}> wants **${interaction.fields.getTextInputValue("dig_count")}** blocks digged.`, components: [getTicketButtons()] });
+            return interaction.editReply(`✅ Ticket: ${ticket}`);
+        }
+
+    } catch (err) { console.error(err); }
 });
 
 client.login(process.env.DISCORD_TOKEN);
