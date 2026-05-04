@@ -23,6 +23,8 @@ const MUTE_PINGS_CHANNEL_ID = "1496222658050785290";
 const TICKET_CATEGORY_ID = "1496950777275486429";
 const STAFF_ROLE_ID = "1496951778967683072";
 const NEW_STAFF_ROLE_ID = "1498572067212103730";
+const MARKET_ROLE_ID = "1500770062762639394"; // Role for Market tickets
+
 const GEN_HUB_ID = "1496891644895821865";
 const APP_HUB_ID = "1498193257212022835";
 const BUILD_HUB_ID = "1497906110219288646";
@@ -51,7 +53,6 @@ client.on("interactionCreate", async (interaction) => {
             if (interaction.commandName === "setup_hub") {
                 await interaction.deferReply({ ephemeral: true });
                 
-                // General Hub
                 const genChan = await client.channels.fetch(GEN_HUB_ID);
                 const genMenu = new StringSelectMenuBuilder().setCustomId("ticket_gen").setPlaceholder("Choose ticket type...").addOptions(
                     { label: "Giveaways", value: "Giveaways", emoji: "🎉" },
@@ -61,13 +62,11 @@ client.on("interactionCreate", async (interaction) => {
                 );
                 await genChan.send({ components: [new ActionRowBuilder().addComponents(genMenu)] });
 
-                // Application Hub
                 const appChan = await client.channels.fetch(APP_HUB_ID);
-                const appEmbed = new EmbedBuilder().setTitle("📝 Staff Apps").setDescription("Click the button below to apply for the staff team!").setColor("#2ecc71");
+                const appEmbed = new EmbedBuilder().setTitle("📝 Staff Apps").setDescription("Click the button below to apply!").setColor("#2ecc71");
                 const appBtn = new ButtonBuilder().setCustomId("ticket_app").setLabel("Apply Now").setStyle(ButtonStyle.Success);
                 await appChan.send({ embeds: [appEmbed], components: [new ActionRowBuilder().addComponents(appBtn)] });
 
-                // Building Hub
                 const buildChan = await client.channels.fetch(BUILD_HUB_ID);
                 const buildMenu = new StringSelectMenuBuilder().setCustomId("ticket_build").setPlaceholder("Choose a farm...").addOptions(
                     { label: "Ikea v1-v4", value: "Ikea-Farm" }, { label: "Mauschu Starter", value: "Mauschu-Starter" },
@@ -99,7 +98,7 @@ client.on("interactionCreate", async (interaction) => {
             const choice = interaction.values[0];
             if (interaction.customId === "ticket_build") {
                 await interaction.deferReply({ ephemeral: true });
-                const ticket = await createTicket(interaction, choice, false);
+                const ticket = await createTicket(interaction, choice);
                 await ticket.send({ content: `${interaction.user} | <@&${STAFF_ROLE_ID}>`, components: [createTicketButtons(interaction.user.id)] });
                 return interaction.editReply(`Ticket opened: ${ticket}`);
             }
@@ -137,20 +136,20 @@ client.on("interactionCreate", async (interaction) => {
         if (interaction.isModalSubmit()) {
             await interaction.deferReply({ ephemeral: true });
             const type = interaction.customId.replace("modal_", "");
-            const isStaffApp = type === "StaffApp";
-            const ticket = await createTicket(interaction, type, isStaffApp);
+            const ticket = await createTicket(interaction, type);
 
             const embed = new EmbedBuilder().setTitle(`${type} Information`).setColor("Blue");
             interaction.fields.fields.forEach(f => embed.addFields({ name: f.customId, value: f.value }));
 
-            if (isStaffApp) {
+            if (type === "StaffApp") {
                 const row = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId(`accept_${interaction.user.id}`).setLabel("Accept").setStyle(ButtonStyle.Success),
                     new ButtonBuilder().setCustomId(`deny_${interaction.user.id}`).setLabel("Deny").setStyle(ButtonStyle.Danger)
                 );
                 await ticket.send({ content: `New App from ${interaction.user}!\nAttention: <@${APP_VIEWER_ID}>`, embeds: [embed], components: [row] });
             } else {
-                await ticket.send({ content: `${interaction.user} | <@&${STAFF_ROLE_ID}>`, embeds: [embed], components: [createTicketButtons(interaction.user.id)] });
+                const pingRole = type === "Market" ? `<@&${MARKET_ROLE_ID}>` : `<@&${STAFF_ROLE_ID}>`;
+                await ticket.send({ content: `${interaction.user} | ${pingRole}`, embeds: [embed], components: [createTicketButtons(interaction.user.id)] });
             }
             return interaction.editReply(`Ticket opened: ${ticket}`);
         }
@@ -163,7 +162,13 @@ client.on("interactionCreate", async (interaction) => {
             }
 
             if (interaction.customId.startsWith("claim_")) {
-                if (!interaction.member.roles.cache.has(STAFF_ROLE_ID)) return interaction.reply({ content: "❌ Staff only.", ephemeral: true });
+                const isMarket = interaction.channel.name.startsWith("market-");
+                const requiredRole = isMarket ? MARKET_ROLE_ID : STAFF_ROLE_ID;
+
+                if (!interaction.member.roles.cache.has(requiredRole)) {
+                    return interaction.reply({ content: `❌ Only staff with the correct role can claim this.`, ephemeral: true });
+                }
+
                 const creatorId = interaction.customId.split("_")[1];
                 await interaction.channel.permissionOverwrites.set([
                     { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
@@ -179,18 +184,15 @@ client.on("interactionCreate", async (interaction) => {
                     return interaction.reply({ content: "❌ Only the Staff Manager can do this.", ephemeral: true });
                 }
 
-                // FIX: Use deferReply first to prevent "Thinking" hang
                 await interaction.deferReply({ ephemeral: true });
                 const isAccept = interaction.customId.startsWith("accept_");
                 const targetId = interaction.customId.split("_")[1];
 
                 try {
-                    // 1. Generate Transcript
                     const messages = await interaction.channel.messages.fetch({ limit: 100 });
                     const transcriptData = messages.reverse().map(m => `[${m.createdAt.toLocaleString()}] ${m.author.tag}: ${m.content || "[Embed/Image]"}`).join("\n");
                     const attachment = new AttachmentBuilder(Buffer.from(transcriptData, "utf-8"), { name: `transcript-${targetId}.txt` });
 
-                    // 2. Log to Channel
                     const logChan = await client.channels.fetch(TRANSCRIPT_CHANNEL_ID);
                     const logEmbed = new EmbedBuilder()
                         .setTitle(`App Processed: ${isAccept ? "ACCEPTED" : "DENIED"}`)
@@ -198,36 +200,38 @@ client.on("interactionCreate", async (interaction) => {
                         .setColor(isAccept ? "Green" : "Red");
                     await logChan.send({ embeds: [logEmbed], files: [attachment] });
 
-                    // 3. Update Member
                     const targetMember = await interaction.guild.members.fetch(targetId).catch(() => null);
                     if (targetMember) {
                         if (isAccept) {
-                            await targetMember.roles.add([STAFF_ROLE_ID, NEW_STAFF_ROLE_ID]).catch(err => console.log("ROLE ERROR: Put bot role higher in settings!"));
+                            await targetMember.roles.add([STAFF_ROLE_ID, NEW_STAFF_ROLE_ID]).catch(() => {});
                             await targetMember.send("🎉 Your staff application was **ACCEPTED**!").catch(() => {});
                         } else {
                             await targetMember.send("❌ Your staff application was **DENIED**.").catch(() => {});
                         }
                     }
-
-                    await interaction.editReply("✅ Transcript sent and user notified. Closing ticket...");
+                    await interaction.editReply("✅ Processed and ticket closing...");
                 } catch (e) {
-                    console.error("Processing Error:", e);
-                    await interaction.editReply("⚠️ Error occurred during processing, but ticket will close.");
+                    await interaction.editReply("⚠️ Processing error occurred.");
                 }
-                
                 setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
             }
         }
-    } catch (e) { console.error("Interaction Error:", e); }
+    } catch (e) { console.error(e); }
 });
 
-async function createTicket(interaction, type, isStaffApp) {
+async function createTicket(interaction, type) {
     const overwrites = [
         { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
         { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
     ];
-    if (isStaffApp) overwrites.push({ id: APP_VIEWER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-    else overwrites.push({ id: STAFF_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+
+    if (type === "StaffApp") {
+        overwrites.push({ id: APP_VIEWER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+    } else if (type === "Market") {
+        overwrites.push({ id: MARKET_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+    } else {
+        overwrites.push({ id: STAFF_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+    }
 
     return await interaction.guild.channels.create({
         name: `${type.toLowerCase()}-${interaction.user.username}`,
