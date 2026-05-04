@@ -17,9 +17,9 @@ const client = new Client({
 });
 
 // --- CONFIG ---
-const AUTHORIZED_USER_ID = "1453824331346874500"; // Admin bypass
-const APP_VIEWER_ID = "1463979533857456312"; // ONLY this user can see staff apps
-const TRANSCRIPT_CHANNEL_ID = "1499498906419990692"; // Transcript logs
+const AUTHORIZED_USER_ID = "1453824331346874500"; 
+const APP_VIEWER_ID = "1463979533857456312"; 
+const TRANSCRIPT_CHANNEL_ID = "1499498906419990692"; 
 const MUTE_PINGS_CHANNEL_ID = "1496222658050785290";
 const TICKET_CATEGORY_ID = "1496950777275486429";
 const STAFF_ROLE_ID = "1496951778967683072";
@@ -28,11 +28,8 @@ const GEN_HUB_ID = "1496891644895821865";
 const APP_HUB_ID = "1498193257212022835";
 const BUILD_HUB_ID = "1497906110219288646";
 
-let giveawayWinners = new Map();
-
 client.once("ready", () => console.log(`✅ ${client.user.tag} is online!`));
 
-// --- 1. AUTO-MESSAGE LOGIC ---
 client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
     if (message.channel.id === MUTE_PINGS_CHANNEL_ID) {
@@ -42,7 +39,6 @@ client.on("messageCreate", async (message) => {
 
 client.on("interactionCreate", async (interaction) => {
     try {
-        // --- 2. SLASH COMMANDS ---
         if (interaction.isChatInputCommand()) {
             const isAdmin = interaction.member.permissions.has(PermissionFlagsBits.Administrator);
             const isWhitelistedUser = interaction.user.id === AUTHORIZED_USER_ID;
@@ -53,8 +49,6 @@ client.on("interactionCreate", async (interaction) => {
 
             if (interaction.commandName === "setup_hub") {
                 await interaction.deferReply({ ephemeral: true });
-                
-                // General Hub
                 const genChan = await client.channels.fetch(GEN_HUB_ID);
                 const genMenu = new StringSelectMenuBuilder().setCustomId("ticket_gen").setPlaceholder("Choose ticket type...").addOptions(
                     { label: "Giveaways", value: "Giveaways", emoji: "🎉" },
@@ -64,13 +58,11 @@ client.on("interactionCreate", async (interaction) => {
                 );
                 await genChan.send({ components: [new ActionRowBuilder().addComponents(genMenu)] });
 
-                // Application Hub
                 const appChan = await client.channels.fetch(APP_HUB_ID);
                 const appEmbed = new EmbedBuilder().setTitle("📝 Staff Apps").setDescription("Click to apply!").setColor("#2ecc71");
                 const appBtn = new ButtonBuilder().setCustomId("ticket_app").setLabel("Apply Now").setStyle(ButtonStyle.Success);
                 await appChan.send({ embeds: [appEmbed], components: [new ActionRowBuilder().addComponents(appBtn)] });
 
-                // Building Hub
                 const buildChan = await client.channels.fetch(BUILD_HUB_ID);
                 const buildMenu = new StringSelectMenuBuilder().setCustomId("ticket_build").setPlaceholder("Choose a farm...").addOptions(
                     { label: "Ikea v1-v4", value: "Ikea-Farm" }, { label: "Mauschu Starter", value: "Mauschu-Starter" },
@@ -84,7 +76,6 @@ client.on("interactionCreate", async (interaction) => {
             }
         }
 
-        // --- 3. STAFF APP BUTTON ---
         if (interaction.isButton() && interaction.customId === "ticket_app") {
             const modal = new ModalBuilder().setCustomId("modal_StaffApp").setTitle("Staff Application");
             modal.addComponents(
@@ -97,7 +88,6 @@ client.on("interactionCreate", async (interaction) => {
             return interaction.showModal(modal);
         }
 
-        // --- 4. SELECT MENUS ---
         if (interaction.isStringSelectMenu()) {
             const choice = interaction.values[0];
             if (interaction.customId === "ticket_build") {
@@ -136,12 +126,9 @@ client.on("interactionCreate", async (interaction) => {
             }
         }
 
-        // --- 5. MODAL SUBMISSIONS ---
         if (interaction.isModalSubmit()) {
             await interaction.deferReply({ ephemeral: true });
             const type = interaction.customId.replace("modal_", "");
-            
-            // Special Permission for Staff App: Only APP_VIEWER_ID and Applicant
             const isStaffApp = type === "StaffApp";
             const ticket = await createTicket(interaction, type, isStaffApp);
 
@@ -160,7 +147,6 @@ client.on("interactionCreate", async (interaction) => {
             return interaction.editReply(`Ticket opened: ${ticket}`);
         }
 
-        // --- 6. BUTTONS ---
         if (interaction.isButton()) {
             if (interaction.customId === "close_ticket") {
                 await interaction.reply("🔒 Closing...");
@@ -178,60 +164,56 @@ client.on("interactionCreate", async (interaction) => {
                 return interaction.reply(`✅ Claimed by ${interaction.user}. Locked to you and user.`);
             }
 
-            // Accept / Deny with Transcript
             if (interaction.customId.startsWith("accept_") || interaction.customId.startsWith("deny_")) {
-                // Security: Only allow the specific APP_VIEWER_ID or Admin to click
                 if (interaction.user.id !== APP_VIEWER_ID && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-                    return interaction.reply({ content: "❌ Only the designated Staff Manager can process this.", ephemeral: true });
+                    return interaction.reply({ content: "❌ Only the Staff Manager can do this.", ephemeral: true });
                 }
 
                 const isAccept = interaction.customId.startsWith("accept_");
                 const targetId = interaction.customId.split("_")[1];
-                const target = await interaction.guild.members.fetch(targetId).catch(() => null);
+                
+                await interaction.reply(`Processing... Sending transcript to logs.`);
 
-                await interaction.reply(`Processing... Generating transcript.`);
-
-                // 1. Generate Transcript
+                // 1. Transcript
                 const messages = await interaction.channel.messages.fetch({ limit: 100 });
-                const transcriptData = messages.reverse().map(m => `[${m.createdAt.toLocaleString()}] ${m.author.tag}: ${m.content || (m.embeds.length ? "[Embed]" : "[Attachment]")}`).join("\n");
+                const transcriptData = messages.reverse().map(m => `[${m.createdAt.toLocaleString()}] ${m.author.tag}: ${m.content || "[Embed/Image]"}`).join("\n");
                 const attachment = new AttachmentBuilder(Buffer.from(transcriptData, "utf-8"), { name: `transcript-${targetId}.txt` });
 
-                // 2. Send Transcript to Logs
                 const logChan = await client.channels.fetch(TRANSCRIPT_CHANNEL_ID);
                 const logEmbed = new EmbedBuilder()
-                    .setTitle(`Application Log: ${isAccept ? "ACCEPTED" : "DENIED"}`)
-                    .addFields({ name: "Applicant", value: `<@${targetId}>` }, { name: "Processed By", value: `${interaction.user}` })
+                    .setTitle(`App Processed: ${isAccept ? "ACCEPTED" : "DENIED"}`)
+                    .setDescription(`**User:** <@${targetId}>\n**By:** ${interaction.user}`)
                     .setColor(isAccept ? "Green" : "Red");
                 await logChan.send({ embeds: [logEmbed], files: [attachment] });
 
-                // 3. Notify User
-                if (target) {
+                // 2. Roles and Messaging
+                try {
+                    const targetMember = await interaction.guild.members.fetch(targetId);
                     if (isAccept) {
-                        await target.roles.add([STAFF_ROLE_ID, NEW_STAFF_ROLE_ID]);
-                        await target.send("🎉 Your staff application was ACCEPTED!").catch(() => {});
+                        await targetMember.roles.add([STAFF_ROLE_ID, NEW_STAFF_ROLE_ID]).catch(err => console.log("HIERARCHY ERROR: Bot role must be higher than the roles it is giving!"));
+                        await targetMember.send("🎉 Your application was **ACCEPTED**. Check the server!").catch(() => {});
                     } else {
-                        await target.send("❌ Your staff application was DENIED.").catch(() => {});
+                        await targetMember.send("❌ Your application was **DENIED**.").catch(() => {});
                     }
+                } catch (e) {
+                    console.log("Could not find user or give roles:", e.message);
                 }
                 
+                // 3. Final Close
+                await interaction.followUp("✅ Process complete. Closing ticket in 3s...");
                 setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
             }
         }
     } catch (e) { console.error(e); }
 });
 
-// Helpers
 async function createTicket(interaction, type, isStaffApp) {
     const overwrites = [
         { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
         { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
     ];
-
-    if (isStaffApp) {
-        overwrites.push({ id: APP_VIEWER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-    } else {
-        overwrites.push({ id: STAFF_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
-    }
+    if (isStaffApp) overwrites.push({ id: APP_VIEWER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
+    else overwrites.push({ id: STAFF_ROLE_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
 
     return await interaction.guild.channels.create({
         name: `${type.toLowerCase()}-${interaction.user.username}`,
