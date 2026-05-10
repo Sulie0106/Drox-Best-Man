@@ -16,7 +16,7 @@ const client = new Client({
     partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User]
 });
 
-// --- CONFIG ---
+// --- CONFIG (Updated with your new IDs) ---
 const AUTHORIZED_USER_ID = "1501597756794474497"; 
 const APP_VIEWER_ID = "1453824331346874500"; 
 const TRANSCRIPT_CHANNEL_ID = "1503089057557774336"; 
@@ -33,7 +33,9 @@ const BUILD_HUB_ID = "1503089028382199878";
 // Giveaway Storage
 const activeGiveaways = new Map(); 
 
-client.once("ready", () => console.log(`✅ ${client.user.tag} is online and synced with new commands!`));
+client.once("ready", () => {
+    console.log(`✅ 𝓒𝓾𝓻𝓻𝓸𝓹𝓽𝓲𝓸𝓷 𝓪𝓷𝓭 𝓭𝓸𝓻𝓪 𝓫𝓸𝓽 is online and ready for action!`);
+});
 
 // --- 1. AUTO-MESSAGE LOGIC ---
 client.on("messageCreate", async (message) => {
@@ -91,7 +93,7 @@ client.on("interactionCreate", async (interaction) => {
                 const winnerCount = interaction.options.getInteger("winners");
                 const durationMs = ms(timeStr);
 
-                if (!durationMs) return interaction.reply({ content: "❌ Invalid time format! (Use 10m, 1h, 1d)", ephemeral: true });
+                if (!durationMs) return interaction.reply({ content: "❌ Invalid time format!", ephemeral: true });
 
                 const endsAt = Math.floor((Date.now() + durationMs) / 1000);
                 const embed = new EmbedBuilder()
@@ -112,11 +114,8 @@ client.on("interactionCreate", async (interaction) => {
                     activeGiveaways.delete(msg.id);
 
                     const entrants = Array.from(data.entrants);
-                    if (entrants.length === 0) {
-                        return msg.edit({ content: "❌ Giveaway ended. No one joined.", embeds: [], components: [] });
-                    }
+                    if (entrants.length === 0) return msg.edit({ content: "❌ Giveaway ended. No entrants.", embeds: [], components: [] });
 
-                    // Pick random winners
                     const winnersArr = [];
                     for (let i = 0; i < Math.min(data.winners, entrants.length); i++) {
                         const randomIdx = Math.floor(Math.random() * entrants.length);
@@ -129,7 +128,6 @@ client.on("interactionCreate", async (interaction) => {
                         .setDescription(`**Prize:** ${data.prize}\n**Winner(s):** ${winnersMention}\n**Hosted by:** <@${data.hostId}>`)
                         .setColor("Purple");
 
-                    // Create Claim button for EVERY winner
                     const claimRow = new ActionRowBuilder();
                     winnersArr.forEach((wID, index) => {
                         claimRow.addComponents(
@@ -138,7 +136,7 @@ client.on("interactionCreate", async (interaction) => {
                     });
 
                     await msg.edit({ embeds: [winEmbed], components: [claimRow] });
-                    await msg.reply(`Congratulations ${winnersMention}! Click the button above to claim your prize!`);
+                    await msg.reply(`Congratulations ${winnersMention}! Click the button above to claim!`);
                 }, durationMs);
 
                 return interaction.reply({ content: "✅ Giveaway started!", ephemeral: true });
@@ -146,7 +144,7 @@ client.on("interactionCreate", async (interaction) => {
 
             // Command: /close
             if (interaction.commandName === "close") {
-                if (!interaction.channel.name.includes("-")) return interaction.reply({ content: "❌ This is not a ticket channel.", ephemeral: true });
+                if (!interaction.channel.name.includes("-")) return interaction.reply({ content: "❌ Not a ticket channel.", ephemeral: true });
                 await interaction.reply("🔒 Closing ticket...");
                 return setTimeout(() => interaction.channel.delete().catch(() => {}), 2000);
             }
@@ -155,69 +153,43 @@ client.on("interactionCreate", async (interaction) => {
             if (interaction.commandName === "rename") {
                 const newName = interaction.options.getString("name");
                 await interaction.channel.setName(newName);
-                return interaction.reply(`✅ Channel renamed to **${newName}**`);
-            }
-
-            // Command: /strike
-            if (interaction.commandName === "strike") {
-                const target = interaction.options.getUser("user");
-                const reason = interaction.options.getString("reason") || "No reason provided.";
-                // In a real bot, you'd save this to a database.
-                return interaction.reply(`⚠️ **Staff Strike Issued**\n**User:** ${target}\n**Reason:** ${reason}`);
-            }
-
-            // Command: /track_partner
-            if (interaction.commandName === "track_partner") {
-                const partnerUser = interaction.options.getUser("user");
-                const amount = interaction.options.getInteger("amount");
-                return interaction.reply(`🤝 **Partnership Tracked**\n**User:** ${partnerUser}\n**Added:** ${amount} partner(s).`);
+                return interaction.reply(`✅ Renamed to **${newName}**`);
             }
         }
 
         // --- 3. BUTTON HANDLERS ---
         if (interaction.isButton()) {
-            
-            // Join Giveaway (Entrant count hidden)
             if (interaction.customId === "gw_join") {
                 const data = activeGiveaways.get(interaction.message.id);
-                if (!data) return interaction.reply({ content: "❌ This giveaway has ended.", ephemeral: true });
-                if (data.entrants.has(interaction.user.id)) return interaction.reply({ content: "⚠️ You are already in the giveaway!", ephemeral: true });
-                
+                if (!data) return interaction.reply({ content: "❌ Ended.", ephemeral: true });
+                if (data.entrants.has(interaction.user.id)) return interaction.reply({ content: "⚠️ Already joined!", ephemeral: true });
                 data.entrants.add(interaction.user.id);
-                return interaction.reply({ content: "✅ Success! You've joined the giveaway.", ephemeral: true });
+                return interaction.reply({ content: "✅ Joined!", ephemeral: true });
             }
 
-            // Claim Giveaway Prize (Winner Logic)
             if (interaction.customId.startsWith("gw_claim_")) {
                 const winnerId = interaction.customId.split("_")[2];
-                if (interaction.user.id !== winnerId) {
-                    return interaction.reply({ content: "❌ This button is only for the specific winner!", ephemeral: true });
-                }
+                if (interaction.user.id !== winnerId) return interaction.reply({ content: "❌ Not your prize!", ephemeral: true });
 
                 await interaction.deferReply({ ephemeral: true });
                 const ticket = await createTicket(interaction, "Giveaway-Claim");
                 await ticket.send({ 
                     content: `${interaction.user} | <@&${STAFF_ROLE_ID}>`, 
-                    embeds: [new EmbedBuilder().setTitle("🎁 Prize Claim").setDescription(`${interaction.user} is here to claim their prize.`).setColor("Green")],
+                    embeds: [new EmbedBuilder().setTitle("🎁 Prize Claim").setDescription(`${interaction.user} is here to claim.`).setColor("Green")],
                     components: [createTicketButtons(interaction.user.id)] 
                 });
                 return interaction.editReply(`✅ Ticket created: ${ticket}`);
             }
 
-            // Close Ticket Button
             if (interaction.customId === "close_ticket") {
                 await interaction.reply("🔒 Closing...");
                 return setTimeout(() => interaction.channel.delete().catch(() => {}), 2000);
             }
 
-            // Staff Claim Ticket Button
             if (interaction.customId.startsWith("claim_")) {
                 const isMarket = interaction.channel.name.startsWith("market-");
                 const requiredRole = isMarket ? MARKET_ROLE_ID : STAFF_ROLE_ID;
-
-                if (!interaction.member.roles.cache.has(requiredRole)) {
-                    return interaction.reply({ content: `❌ You need the correct staff role to claim this.`, ephemeral: true });
-                }
+                if (!interaction.member.roles.cache.has(requiredRole)) return interaction.reply({ content: "❌ Unauthorized staff.", ephemeral: true });
 
                 const creatorId = interaction.customId.split("_")[1];
                 await interaction.channel.permissionOverwrites.set([
@@ -225,10 +197,9 @@ client.on("interactionCreate", async (interaction) => {
                     { id: creatorId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
                     { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
                 ]);
-                return interaction.reply(`✅ Ticket claimed by ${interaction.user}. Access restricted to user and claimant.`);
+                return interaction.reply(`✅ Claimed by ${interaction.user}`);
             }
 
-            // Staff Application Logic
             if (interaction.customId === "ticket_app") {
                 const modal = new ModalBuilder().setCustomId("modal_StaffApp").setTitle("Staff Application");
                 modal.addComponents(
@@ -236,12 +207,11 @@ client.on("interactionCreate", async (interaction) => {
                     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q2").setLabel("Staff Experience?").setStyle(TextInputStyle.Paragraph).setRequired(true)),
                     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q3").setLabel("Vouches/Scams?").setStyle(TextInputStyle.Short).setRequired(true)),
                     new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q4").setLabel("Giveaways per week?").setStyle(TextInputStyle.Short).setRequired(true)),
-                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q5").setLabel("Have you read the rules?").setStyle(TextInputStyle.Short).setRequired(true))
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q5").setLabel("Read the rules?").setStyle(TextInputStyle.Short).setRequired(true))
                 );
                 return interaction.showModal(modal);
             }
 
-            // Accept/Deny Application
             if (interaction.customId.startsWith("accept_") || interaction.customId.startsWith("deny_")) {
                 if (interaction.user.id !== APP_VIEWER_ID && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
                     return interaction.reply({ content: "❌ Unauthorized.", ephemeral: true });
@@ -265,19 +235,19 @@ client.on("interactionCreate", async (interaction) => {
                     if (isAccept) await targetMember.roles.add([STAFF_ROLE_ID, NEW_STAFF_ROLE_ID]).catch(() => {});
                     await targetMember.send(`Your application was ${isAccept ? "ACCEPTED" : "DENIED"}.`).catch(() => {});
                 }
-                await interaction.editReply("✅ Application processed.");
+                await interaction.editReply("✅ Processed.");
                 setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
             }
         }
 
-        // --- 4. SELECT MENUS HANDLER ---
+        // --- 4. SELECT MENUS & 5. MODALS ---
         if (interaction.isStringSelectMenu()) {
             const choice = interaction.values[0];
             if (interaction.customId === "ticket_build") {
                 await interaction.deferReply({ ephemeral: true });
                 const ticket = await createTicket(interaction, choice);
                 await ticket.send({ content: `${interaction.user} | <@&${STAFF_ROLE_ID}>`, components: [createTicketButtons(interaction.user.id)] });
-                return interaction.editReply(`Ticket opened: ${ticket}`);
+                return interaction.editReply(`Opened: ${ticket}`);
             }
             if (interaction.customId === "ticket_gen") {
                 let modal = new ModalBuilder().setCustomId(`modal_${choice}`).setTitle(`${choice} Details`);
@@ -285,23 +255,22 @@ client.on("interactionCreate", async (interaction) => {
                     modal.addComponents(
                         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q1").setLabel("Who hosted?").setStyle(TextInputStyle.Short).setRequired(true)),
                         new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q2").setLabel("What did you win?").setStyle(TextInputStyle.Short).setRequired(true)),
-                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q3").setLabel("What is your IGN?").setStyle(TextInputStyle.Short).setRequired(true))
+                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q3").setLabel("IGN?").setStyle(TextInputStyle.Short).setRequired(true))
                     );
                 } else if (choice === "Support") {
-                    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q1").setLabel("How can we help?").setStyle(TextInputStyle.Paragraph).setRequired(true)));
+                    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q1").setLabel("Help needed?").setStyle(TextInputStyle.Paragraph).setRequired(true)));
                 } else if (choice === "Market") {
                     modal.addComponents(
-                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q1").setLabel("Buying or Selling?").setStyle(TextInputStyle.Short).setRequired(true)),
-                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q2").setLabel("Item & Amount?").setStyle(TextInputStyle.Short).setRequired(true))
+                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q1").setLabel("Buying/Selling?").setStyle(TextInputStyle.Short).setRequired(true)),
+                        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q2").setLabel("Item?").setStyle(TextInputStyle.Short).setRequired(true))
                     );
                 } else if (choice === "Partnership") {
-                    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q1").setLabel("Server Member Count?").setStyle(TextInputStyle.Short).setRequired(true)));
+                    modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId("q1").setLabel("Member Count?").setStyle(TextInputStyle.Short).setRequired(true)));
                 }
                 return interaction.showModal(modal);
             }
         }
 
-        // --- 5. MODAL SUBMISSIONS HANDLER ---
         if (interaction.isModalSubmit()) {
             await interaction.deferReply({ ephemeral: true });
             const type = interaction.customId.replace("modal_", "");
@@ -319,12 +288,12 @@ client.on("interactionCreate", async (interaction) => {
                 const role = type === "Market" ? MARKET_ROLE_ID : STAFF_ROLE_ID;
                 await ticket.send({ content: `${interaction.user} | <@&${role}>`, embeds: [embed], components: [createTicketButtons(interaction.user.id)] });
             }
-            return interaction.editReply(`Ticket opened: ${ticket}`);
+            return interaction.editReply(`Opened: ${ticket}`);
         }
     } catch (e) { console.error(e); }
 });
 
-// --- HELPER FUNCTIONS ---
+// --- HELPERS ---
 async function createTicket(interaction, type) {
     const overwrites = [
         { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
