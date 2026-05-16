@@ -10,9 +10,8 @@ const client = new Client({
         GatewayIntentBits.Guilds, 
         GatewayIntentBits.GuildMessages, 
         GatewayIntentBits.GuildMembers, 
-        GatewayIntentBits.MessageContent, 
-        GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.DirectMessageContent
+        GatewayIntentBits.MessageContent, // Covers content for BOTH guilds and DMs
+        GatewayIntentBits.DirectMessages
     ],
     partials: [Partials.Channel, Partials.Message, Partials.User]
 });
@@ -63,7 +62,6 @@ client.once("ready", () => {
 
 // --- INTERACTION HANDLER ---
 client.on("interactionCreate", async (interaction) => {
-    // 1. IMMEDIATE ACKNOWLEDGEMENT (Fixes "Did not respond" / "Interaction Failed")
     try {
         if (interaction.isChatInputCommand() || interaction.isButton() || interaction.isStringSelectMenu()) {
             console.log(`[🚀 Interaction Received] Type: ${interaction.type} | ID: ${interaction.customId || interaction.commandName} from ${interaction.user.tag}`);
@@ -74,7 +72,6 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // 2. EXECUTE LOGIC
     try {
         // --- SLASH COMMANDS ---
         if (interaction.isChatInputCommand()) {
@@ -134,7 +131,6 @@ client.on("interactionCreate", async (interaction) => {
 
         // --- BUTTONS ---
         if (interaction.isButton()) {
-            // BACKWARD COMPATIBILITY: Map old "ticket_app" button to general staff app just in case
             let customId = interaction.customId;
             if (customId === "ticket_app") customId = "app_staff";
 
@@ -146,7 +142,6 @@ client.on("interactionCreate", async (interaction) => {
                     await interaction.user.send(`✨ Starting your **${type.toUpperCase()}** application...`);
                     await interaction.editReply(`📩 DMs opened! Please check your Direct Messages to complete the application.`);
                     
-                    // Run this in background so interaction doesn't hang
                     handleDMApplication(interaction.user, type, interaction.guild);
                 } catch (dmErr) {
                     console.log(`[❌ App] Could not DM user ${interaction.user.tag}`);
@@ -239,7 +234,7 @@ async function handleDMApplication(user, type, guild) {
                 { id: APP_VIEWER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
             ]
         }).catch((err) => {
-            console.error("❌ Could not create application channel channel. Missing Permissions or Category ID invalid:", err);
+            console.error("❌ Could not create application channel. Missing Permissions or Category ID invalid:", err);
             return null;
         });
 
