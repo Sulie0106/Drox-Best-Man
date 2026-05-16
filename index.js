@@ -4,13 +4,14 @@ const {
     ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, 
     Partials, StringSelectMenuBuilder, ActivityType 
 } = require("discord.js");
+const ms = require("ms"); // For parsing giveaway times (e.g., "1h", "30m")
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds, 
         GatewayIntentBits.GuildMessages, 
         GatewayIntentBits.GuildMembers, 
-        GatewayIntentBits.MessageContent, // Covers content for BOTH guilds and DMs
+        GatewayIntentBits.MessageContent, 
         GatewayIntentBits.DirectMessages
     ],
     partials: [Partials.Channel, Partials.Message, Partials.User]
@@ -19,8 +20,6 @@ const client = new Client({
 // --- CONFIG ---
 const AUTHORIZED_USER_ID = "1501597756794474497"; 
 const APP_VIEWER_ID = "1453824331346874500"; 
-const TRANSCRIPT_CHANNEL_ID = "1481710822471241758"; 
-const MUTE_PINGS_CHANNEL_ID = "1481693716124012818";
 const TICKET_CATEGORY_ID = "1491159170265907390";
 const STAFF_ROLE_ID = "1487093799304954047";
 const NEW_STAFF_ROLE_ID = "1489175813398986782";
@@ -52,6 +51,7 @@ const APP_QUESTIONS = {
     ]
 };
 
+// Global map to hold active giveaway data
 const activeGiveaways = new Map(); 
 
 client.once("ready", () => {
@@ -62,63 +62,62 @@ client.once("ready", () => {
 
 // --- INTERACTION HANDLER ---
 client.on("interactionCreate", async (interaction) => {
+    
+    // 1. SMART ACKNOWLEDGEMENT
     try {
-        if (interaction.isChatInputCommand() || interaction.isButton() || interaction.isStringSelectMenu()) {
-            console.log(`[🚀 Interaction Received] Type: ${interaction.type} | ID: ${interaction.customId || interaction.commandName} from ${interaction.user.tag}`);
+        if (interaction.isChatInputCommand() || interaction.isStringSelectMenu()) {
             await interaction.deferReply({ ephemeral: true }).catch(() => {});
+        } else if (interaction.isButton()) {
+            // Giveaway join buttons need immediate page updates, not standard ephemerals
+            if (!interaction.customId.startsWith("gw_join_")) {
+                await interaction.deferReply({ ephemeral: true }).catch(() => {});
+            }
         }
     } catch (err) {
-        console.error("❌ Failed to defer interaction:", err);
+        console.error("❌ Failed to acknowledge interaction:", err);
         return;
     }
 
     try {
         // --- SLASH COMMANDS ---
         if (interaction.isChatInputCommand()) {
+            
+            // --- SETUP HUB COMMAND ---
             if (interaction.commandName === "setup_hub") {
                 const isAdmin = interaction.member?.permissions.has(PermissionFlagsBits.Administrator);
                 const isWhitelisted = interaction.user.id === AUTHORIZED_USER_ID;
-                if (!isAdmin && !isWhitelisted) {
-                    return interaction.editReply("🚫 You do not have permission to use this command.");
-                }
+                if (!isAdmin && !isWhitelisted) return interaction.editReply("🚫 Access denied.");
 
-                console.log("[⚙️ Setup] Fetching channels...");
                 const genChan = await client.channels.fetch(GEN_HUB_ID).catch(() => null);
                 const appChan = await client.channels.fetch(APP_HUB_ID).catch(() => null);
                 const buildChan = await client.channels.fetch(BUILD_HUB_ID).catch(() => null);
 
-                if (!genChan || !appChan || !buildChan) {
-                    return interaction.editReply("❌ Setup failed. One or more Hub Channel IDs are incorrect or invisible to the bot.");
-                }
+                if (!genChan || !appChan || !buildChan) return interaction.editReply("❌ Hub setup failed. Check channel IDs.");
 
-                // Setup Gen Hub
+                // Gen Hub
                 const genMenu = new StringSelectMenuBuilder().setCustomId("ticket_gen").setPlaceholder("Select Ticket Category...").addOptions(
-                    { label: "Giveaways", value: "Giveaways", emoji: "🎉" },
-                    { label: "Partnership", value: "Partnership", emoji: "🤝" },
-                    { label: "Support", value: "Support", emoji: "🛠️" },
-                    { label: "Market", value: "Market", emoji: "🛒" }
+                    { label: "Giveaways", value: "Giveaways", emoji: "🎉" }, { label: "Partnership", value: "Partnership", emoji: "🤝" },
+                    { label: "Support", value: "Support", emoji: "🛠️" }, { label: "Market", value: "Market", emoji: "🛒" }
                 );
                 await genChan.send({ 
                     embeds: [new EmbedBuilder().setTitle("🎫 Support Center").setDescription("Select a category below to open a ticket.").setColor("#5865F2")],
                     components: [new ActionRowBuilder().addComponents(genMenu)] 
                 });
 
-                // Setup App Hub
+                // App Hub
                 const appBtns = new ActionRowBuilder().addComponents(
                     new ButtonBuilder().setCustomId("app_staff").setLabel("Staff App").setStyle(ButtonStyle.Primary).setEmoji("🛡️"),
                     new ButtonBuilder().setCustomId("app_builder").setLabel("Builder App").setStyle(ButtonStyle.Success).setEmoji("🔨"),
                     new ButtonBuilder().setCustomId("app_pm").setLabel("Partner Manager").setStyle(ButtonStyle.Secondary).setEmoji("🤝")
                 );
                 await appChan.send({ 
-                    embeds: [new EmbedBuilder().setTitle("📝 Recruitment").setDescription("Click a button below to apply! The bot will DM you.").setColor("#2ecc71")], 
+                    embeds: [new EmbedBuilder().setTitle("📝 Recruitment").setDescription("Click a button below to apply!").setColor("#2ecc71")], 
                     components: [appBtns] 
                 });
 
-                // Setup Build Hub
+                // Build Hub
                 const buildMenu = new StringSelectMenuBuilder().setCustomId("ticket_build").setPlaceholder("Select Farm...").addOptions(
-                    { label: "Ikea v1-v4", value: "Ikea-Farm" },
-                    { label: "Mauschu Starter", value: "Mauschu-Starter" },
-                    { label: "Mauschu v1-v4", value: "Mauschu-Mid" }
+                    { label: "Ikea v1-v4", value: "Ikea-Farm" }, { label: "Mauschu Starter", value: "Mauschu-Starter" }, { label: "Mauschu v1-v4", value: "Mauschu-Mid" }
                 );
                 await buildChan.send({ 
                     embeds: [new EmbedBuilder().setTitle("🏗️ Construction").setDescription("Select a farm schematic to request a build.").setColor("#e67e22")],
@@ -127,37 +126,142 @@ client.on("interactionCreate", async (interaction) => {
 
                 return interaction.editReply("✅ All Hubs deployed successfully!");
             }
+
+            // --- GIVEAWAY CREATE COMMAND (/gwcreate) ---
+            if (interaction.commandName === "gwcreate") {
+                // Ensure caller has Manage Messages or Admin
+                if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+                    return interaction.editReply("🚫 You need 'Manage Messages' permission to host giveaways.");
+                }
+
+                // Safely grab arguments from slash options
+                const prize = interaction.options.getString("prize") || "Secret Prize";
+                const durationStr = interaction.options.getString("duration") || "10m";
+                const winnersCount = interaction.options.getInteger("winners") || 1;
+
+                const durationMs = ms(durationStr);
+                if (!durationMs) return interaction.editReply("❌ Invalid time format! Use formats like `10m`, `2h`, or `1d`.");
+
+                const endTimestamp = Math.floor((Date.now() + durationMs) / 1000);
+
+                const gwEmbed = new EmbedBuilder()
+                    .setTitle(`🎉 GIVEAWAY: ${prize} 🎉`)
+                    .setDescription(`Click the 🎉 button below to join the draw!\n\n⏳ **Ends:** <t:${endTimestamp}:R> (<t:${endTimestamp}:F>)\n👥 **Winners:** ${winnersCount}\n🗣️ **Hosted by:** ${interaction.user}`)
+                    .setColor("#FFD700")
+                    .setFooter({ text: "Good luck everyone!" });
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(`gw_join_${interaction.id}`).setLabel("Enter (0)").setStyle(ButtonStyle.Primary).setEmoji("🎉")
+                );
+
+                // Send public announcement message into the channel
+                const gwMessage = await interaction.channel.send({ embeds: [gwEmbed], components: [row] });
+                await interaction.editReply("✅ Giveaway successfully deployed!");
+
+                // Store state tracking data
+                const entrants = new Set();
+                activeGiveaways.set(interaction.id, {
+                    messageId: gwMessage.id,
+                    channelId: interaction.channel.id,
+                    entrants: entrants,
+                    prize: prize,
+                    winnersCount: winnersCount
+                });
+
+                // End Timer
+                setTimeout(async () => {
+                    const currentGw = activeGiveaways.get(interaction.id);
+                    if (!currentGw) return;
+
+                    const targetChan = await client.channels.fetch(currentGw.channelId).catch(() => null);
+                    if (!targetChan) return activeGiveaways.delete(interaction.id);
+
+                    const targetMsg = await targetChan.messages.fetch(currentGw.messageId).catch(() => null);
+                    const list = Array.from(currentGw.entrants);
+
+                    if (list.length === 0) {
+                        if (targetMsg) {
+                            await targetMsg.edit({ components: [] });
+                            await targetMsg.reply("😢 The giveaway ended, but nobody joined!");
+                        }
+                    } else {
+                        // Pick random distinct winners
+                        const winners = [];
+                        const totalWinners = Math.min(currentGw.winnersCount, list.length);
+                        
+                        for(let i=0; i < totalWinners; i++) {
+                            const index = Math.floor(Math.random() * list.length);
+                            winners.push(`<@${list.splice(index, 1)[0]}>`);
+                        }
+
+                        if (targetMsg) {
+                            const closedEmbed = EmbedBuilder.from(targetMsg.embeds[0])
+                                .setDescription(`🔒 **Giveaway Closed**\n\n🎁 **Prize:** ${currentGw.prize}\n🏆 **Winners:** ${winners.join(", ")}`)
+                                .setColor("#DD2E44");
+                            await targetMsg.edit({ embeds: [closedEmbed], components: [] });
+                            await targetMsg.reply(`🎉 Congratulations to our winner(s): ${winners.join(", ")}! You won **${currentGw.prize}**!`);
+                        }
+                    }
+                    activeGiveaways.delete(interaction.id);
+                }, durationMs);
+                return;
+            }
+
+            // --- CATCH UNREGISTERED COMMANDS ---
+            // If the code reaches here, it means you registered a command on Discord developers site but haven't written code for it yet.
+            return interaction.editReply(`❌ The command \`/${interaction.commandName}\` is registered but lacks logic in your bot script.`);
         }
 
         // --- BUTTONS ---
         if (interaction.isButton()) {
-            let customId = interaction.customId;
-            if (customId === "ticket_app") customId = "app_staff";
+            const customId = interaction.customId;
 
+            // Handle Giveaway Entrants
+            if (customId.startsWith("gw_join_")) {
+                const gwId = customId.split("_")[2];
+                const gwData = activeGiveaways.get(gwId);
+                
+                if (!gwData) return interaction.reply({ content: "❌ This giveaway has already expired.", ephemeral: true });
+
+                if (gwData.entrants.has(interaction.user.id)) {
+                    gwData.entrants.delete(interaction.user.id);
+                    await interaction.reply({ content: "❌ Removed your entry from the giveaway.", ephemeral: true });
+                } else {
+                    gwData.entrants.add(interaction.user.id);
+                    await interaction.reply({ content: "🎉 You have entered the giveaway!", ephemeral: true });
+                }
+
+                // Update original display counter on button string dynamically
+                const updatedRow = new ActionRowBuilder().addComponents(
+                    ButtonBuilder.from(interaction.message.components[0].components[0])
+                        .setLabel(`Enter (${gwData.entrants.size})`)
+                );
+                return await interaction.message.edit({ components: [updatedRow] });
+            }
+
+            // Application Open Buttons
             if (customId.startsWith("app_")) {
                 const type = customId.split("_")[1];
-                console.log(`[📝 App] Attempting to send DM to ${interaction.user.tag} for ${type} app...`);
-
                 try {
                     await interaction.user.send(`✨ Starting your **${type.toUpperCase()}** application...`);
-                    await interaction.editReply(`📩 DMs opened! Please check your Direct Messages to complete the application.`);
-                    
+                    await interaction.editReply(`📩 Please check your Direct Messages to complete the application.`);
                     handleDMApplication(interaction.user, type, interaction.guild);
                 } catch (dmErr) {
-                    console.log(`[❌ App] Could not DM user ${interaction.user.tag}`);
-                    return interaction.editReply("❌ I couldn't DM you! Please go to Server Settings -> Privacy Settings -> Enable 'Allow Direct Messages from server members'.");
+                    return interaction.editReply("❌ Your Direct Messages are closed! Turn them on under Server Settings -> Privacy.");
                 }
             }
 
+            // Ticket Closing
             if (customId === "close_ticket") {
-                await interaction.editReply("🔒 Closing ticket in 3 seconds...");
+                await interaction.editReply("🔒 Closing ticket channel shortly...");
                 return setTimeout(() => interaction.channel.delete().catch(() => {}), 3000);
             }
 
+            // Ticket Claiming
             if (customId.startsWith("claim_")) {
                 const isMarket = interaction.channel.name.startsWith("market-");
                 const roleReq = isMarket ? MARKET_ROLE_ID : STAFF_ROLE_ID;
-                if (!interaction.member.roles.cache.has(roleReq)) return interaction.editReply("❌ You do not have the required staff role to claim this ticket.");
+                if (!interaction.member.roles.cache.has(roleReq)) return interaction.editReply("❌ Unauthorized staff tier.");
 
                 const creatorId = customId.split("_")[1];
                 await interaction.channel.permissionOverwrites.set([
@@ -165,13 +269,14 @@ client.on("interactionCreate", async (interaction) => {
                     { id: creatorId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
                     { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
                 ]);
-                return interaction.editReply(`✅ Ticket successfully claimed by ${interaction.user}`);
+                return interaction.editReply(`✅ Ticket claimed by ${interaction.user}`);
             }
 
+            // Application Decisions
             if (customId.startsWith("dec_")) {
                 const [ , decision, type, targetId] = customId.split("_");
                 if (interaction.user.id !== APP_VIEWER_ID && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-                    return interaction.editReply("❌ Unauthorized.");
+                    return interaction.editReply("❌ Action unauthorized.");
                 }
 
                 const isAccept = decision === "acc";
@@ -179,12 +284,12 @@ client.on("interactionCreate", async (interaction) => {
                 
                 if (target && isAccept) {
                     await target.roles.add([STAFF_ROLE_ID, NEW_STAFF_ROLE_ID]).catch(() => {});
-                    await target.send(`🎉 Congratulations! Your **${type}** application was accepted.`).catch(() => {});
+                    await target.send(`🎉 Your **${type}** application was accepted!`).catch(() => {});
                 } else if (target) {
-                    await target.send(`❌ Sorry, your **${type}** application was denied.`).catch(() => {});
+                    await target.send(`❌ Your **${type}** application was declined.`).catch(() => {});
                 }
 
-                await interaction.editReply(`✅ Application processed as **${isAccept ? "ACCEPTED" : "DENIED"}**.`);
+                await interaction.editReply(`✅ Application evaluated: **${isAccept ? "ACCEPTED" : "DENIED"}**.`);
                 return setTimeout(() => interaction.channel.delete().catch(() => {}), 2000);
             }
         }
@@ -192,22 +297,21 @@ client.on("interactionCreate", async (interaction) => {
         // --- SELECT MENUS ---
         if (interaction.isStringSelectMenu()) {
             const choice = interaction.values[0];
-            console.log(`[🎫 Ticket] Creating ticket for ${interaction.user.tag} (${choice})...`);
             const ticket = await createTicket(interaction, choice);
             await ticket.send({ 
                 content: `${interaction.user} | <@&${STAFF_ROLE_ID}>`, 
                 components: [createTicketButtons(interaction.user.id)] 
             });
-            return interaction.editReply(`✅ Ticket opened successfully: ${ticket}`);
+            return interaction.editReply(`✅ Ticket opened: ${ticket}`);
         }
 
     } catch (e) {
-        console.error("❌ CRITICAL PROCESSING ERROR:", e);
-        return interaction.editReply(`⚠️ An internal error occurred: ${e.message}`).catch(() => {});
+        console.error("❌ Execution Error:", e);
+        return interaction.editReply(`⚠️ An unexpected error occurred: ${e.message}`).catch(() => {});
     }
 });
 
-// --- DM HANDLER ---
+// --- DM APPLICATIONS PROCESSOR ---
 async function handleDMApplication(user, type, guild) {
     try {
         const questions = APP_QUESTIONS[type];
@@ -218,13 +322,10 @@ async function handleDMApplication(user, type, guild) {
             const filter = m => m.author.id === user.id;
             const collected = await user.dmChannel.awaitMessages({ filter, max: 1, time: 300000, errors: ['time'] }).catch(() => null);
 
-            if (!collected) {
-                return user.send("❌ Application closed due to inactivity (5-minute timeout).");
-            }
+            if (!collected) return user.send("❌ Application expired due to inactivity.");
             answers.push({ q, a: collected.first().content });
         }
 
-        console.log(`[📝 App] Creating channel for ${user.tag}'s application submission...`);
         const ticket = await guild.channels.create({
             name: `app-${type}-${user.username}`,
             type: ChannelType.GuildText,
@@ -233,14 +334,9 @@ async function handleDMApplication(user, type, guild) {
                 { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
                 { id: APP_VIEWER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
             ]
-        }).catch((err) => {
-            console.error("❌ Could not create application channel. Missing Permissions or Category ID invalid:", err);
-            return null;
-        });
+        }).catch(() => null);
 
-        if (!ticket) {
-            return user.send("❌ Server configuration error: Unable to submit your application. Please notify an administrator.");
-        }
+        if (!ticket) return user.send("❌ Error submitting application. Contact server management.");
 
         const embed = new EmbedBuilder().setTitle(`${type.toUpperCase()} Application Submission`).setAuthor({ name: user.tag, iconURL: user.displayAvatarURL() }).setColor("Blue").setTimestamp();
         answers.forEach(ans => embed.addFields({ name: ans.q, value: ans.a }));
@@ -250,14 +346,14 @@ async function handleDMApplication(user, type, guild) {
             new ButtonBuilder().setCustomId(`dec_den_${type}_${user.id}`).setLabel("Deny").setStyle(ButtonStyle.Danger)
         );
 
-        await ticket.send({ content: `<@${APP_VIEWER_ID}> | New applicant waiting for review.`, embeds: [embed], components: [row] });
-        return user.send("✅ Your application has been successfully submitted to the staff team!");
+        await ticket.send({ content: `<@${APP_VIEWER_ID}> | New applicant awaiting verification.`, embeds: [embed], components: [row] });
+        return user.send("✅ Your application has been successfully filed!");
     } catch (err) {
-        console.error("Error in handleDMApplication process:", err);
+        console.error(err);
     }
 }
 
-// --- HELPERS ---
+// --- HELPER WRAPPERS ---
 async function createTicket(interaction, type) {
     return await interaction.guild.channels.create({
         name: `${type.toLowerCase()}-${interaction.user.username}`,
