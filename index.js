@@ -140,7 +140,6 @@ client.on("interactionCreate", async (interaction) => {
 
                 const prize = interaction.options.getString("prize") || "Secret Prize";
                 
-                // 🛠️ SMART FIX: Checks duration, time, and length to catch any choice you used in your slash registration
                 const durationStr = interaction.options.getString("duration") || 
                                     interaction.options.getString("time") || 
                                     interaction.options.getString("length") || 
@@ -150,9 +149,11 @@ client.on("interactionCreate", async (interaction) => {
                 if (!durationMs) return interaction.editReply(`❌ Invalid time format ("${durationStr}")! Please use formats like \`30s\`, \`10m\`, \`2h\`, or \`1d\`.`);
 
                 const endTimestamp = Math.floor((Date.now() + durationMs) / 1000);
+                
+                // 🛠️ FIX: Grabbed the configuration variables BEFORE building the Embed
+                const winnersCount = interaction.options.getInteger("winners") || 1;
 
                 const gwEmbed = new EmbedBuilder().setTitle(`🎉 GIVEAWAY: ${prize} 🎉`).setDescription(`Click 🎉 to join!\n\n⏳ **Ends:** <t:${endTimestamp}:R>\n👥 **Winners:** ${winnersCount}`).setColor("#FFD700");
-                const winnersCount = interaction.options.getInteger("winners") || 1;
 
                 const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`gw_join_${interaction.id}`).setLabel("Enter (0)").setStyle(ButtonStyle.Primary).setEmoji("🎉"));
 
@@ -354,6 +355,7 @@ async function createTicket(interaction, type, categoryId) {
     });
 }
 
+// Global UI Buttons for Tickets
 function createTicketButtons(userId) {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`claim_${userId}`).setLabel("Claim").setStyle(ButtonStyle.Primary),
