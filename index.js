@@ -32,7 +32,7 @@ const CATEGORIES = {
     support: "1491166812379943175",
     giveaway: "1481711966140764192",
     middleman: "1505224366642954290",
-    build: "1491166812379943175" // Defaulting builds to support
+    build: "1491166812379943175" // Defaulting builds to support category
 };
 
 const CHANNELS = {
@@ -92,10 +92,11 @@ client.on("interactionCreate", async (interaction) => {
             if (interaction.commandName === "setup_hub") {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.editReply("🚫 Access denied.");
 
-                // 1. General Support
+                // 1. General Support (ADDED GIVEAWAYS BACK)
                 const genChan = await client.channels.fetch(CHANNELS.genHub).catch(() => null);
                 if (genChan) {
                     const genMenu = new StringSelectMenuBuilder().setCustomId("ticket_gen").setPlaceholder("Select Ticket Category...").addOptions(
+                        { label: "Giveaways", value: "Giveaways", emoji: "🎉" },
                         { label: "Partnership", value: "Partnership", emoji: "🤝" },
                         { label: "Support", value: "Support", emoji: "🛠️" }, 
                         { label: "Market", value: "Market", emoji: "🛒" }
@@ -117,13 +118,13 @@ client.on("interactionCreate", async (interaction) => {
                     await appChan.send({ embeds: [new EmbedBuilder().setTitle("📝 Recruitment").setDescription("Click a button below to apply!").setColor("#2ecc71")], components: [appBtns] });
                 }
 
-                // 3. Build Hub
+                // 3. Build Hub (CHANGED TO BUTTON)
                 const buildChan = await client.channels.fetch(CHANNELS.buildHub).catch(() => null);
                 if (buildChan) {
-                    const buildMenu = new StringSelectMenuBuilder().setCustomId("ticket_build").setPlaceholder("Select Farm...").addOptions(
-                        { label: "Ikea v1-v4", value: "Ikea-Farm" }, { label: "Mauschu Starter", value: "Mauschu-Starter" }, { label: "Mauschu v1-v4", value: "Mauschu-Mid" }
+                    const buildBtn = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId("ticket_btn_build").setLabel("Request Build").setStyle(ButtonStyle.Success).setEmoji("🏗️")
                     );
-                    await buildChan.send({ embeds: [new EmbedBuilder().setTitle("🏗️ Construction").setDescription("Select a farm schematic.").setColor("#e67e22")], components: [new ActionRowBuilder().addComponents(buildMenu)] });
+                    await buildChan.send({ embeds: [new EmbedBuilder().setTitle("🏗️ Construction").setDescription("Click below to request a building service.").setColor("#e67e22")], components: [buildBtn] });
                 }
 
                 // 4. Digging Services
@@ -238,12 +239,14 @@ client.on("interactionCreate", async (interaction) => {
                 return interaction.editReply(`✅ Claim ticket opened: ${ticket}`);
             }
 
-            // Single Button Tickets (Digging & Middleman)
+            // Single Button Tickets (Digging, Middleman, Build)
             if (customId.startsWith("ticket_btn_")) {
                 const type = customId.split("_")[2];
                 let catId = CATEGORIES.support;
+                
                 if (type === "digging") catId = CATEGORIES.market;
                 if (type === "middleman") catId = CATEGORIES.middleman;
+                if (type === "build") catId = CATEGORIES.build;
 
                 const ticket = await createTicket(interaction, type, catId);
                 await ticket.send({ content: `${interaction.user} | <@&${ROLES.staff}>`, components: [createTicketButtons(interaction.user.id)] });
@@ -305,9 +308,10 @@ client.on("interactionCreate", async (interaction) => {
         if (interaction.isStringSelectMenu()) {
             const choice = interaction.values[0];
             let catId = CATEGORIES.support;
+            
             if (choice === "Partnership") catId = CATEGORIES.partnership;
             if (choice === "Market") catId = CATEGORIES.market;
-            if (interaction.customId === "ticket_build") catId = CATEGORIES.build;
+            if (choice === "Giveaways") catId = CATEGORIES.giveaway; // Added back routing
 
             const ticket = await createTicket(interaction, choice, catId);
             await ticket.send({ content: `${interaction.user} | <@&${ROLES.staff}>`, components: [createTicketButtons(interaction.user.id)] });
