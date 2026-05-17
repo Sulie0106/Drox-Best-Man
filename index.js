@@ -10,7 +10,7 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds, 
         GatewayIntentBits.GuildMessages, 
-        GatewayIntentBits.GuildMembers, 
+        GatewayIntentBits.GuildMembers, // CRITICAL: Must be enabled in developer portal for welcome/leave events
         GatewayIntentBits.MessageContent, 
         GatewayIntentBits.DirectMessages
     ],
@@ -55,16 +55,25 @@ const APP_QUESTIONS = {
 const activeGiveaways = new Map(); 
 
 // ==========================================
-// 🔔 EVENTS
+// 🔔 EVENTS (WELCOME & LEAVE)
 // ==========================================
 client.once("ready", () => {
     console.log(`\n✅ Bot successfully connected as: ${client.user.tag}\n`);
 });
 
+// Join Event
 client.on("guildMemberAdd", async (member) => {
     const welcomeChan = await member.guild.channels.fetch(CHANNELS.welcome).catch(() => null);
     if (welcomeChan) {
         welcomeChan.send(`🎉 Welcome to the server, ${member}! Grab a pickaxe, read the rules, and enjoy your stay! ⛏️✨`);
+    }
+});
+
+// Leave Event (Nice but not happy)
+client.on("guildMemberRemove", async (member) => {
+    const welcomeChan = await member.guild.channels.fetch(CHANNELS.welcome).catch(() => null);
+    if (welcomeChan) {
+        welcomeChan.send(`💔 We are sorry to see you leave, ${member}. Wishing you the best on your journey ahead wherever it takes you.`);
     }
 });
 
@@ -146,15 +155,12 @@ client.on("interactionCreate", async (interaction) => {
                                     "10m";
 
                 const durationMs = ms(durationStr);
-                if (!durationMs) return interaction.editReply(`❌ Invalid time format ("${durationStr}")! Please use formats like \`30s\`, \`10m\`, \`2h\`, or \`1d\`.`);
+                if (!durationMs) return interaction.editReply(`❌ Invalid time format ("${durationStr}")!`);
 
                 const endTimestamp = Math.floor((Date.now() + durationMs) / 1000);
-                
-                // 🛠️ FIX: Grabbed the configuration variables BEFORE building the Embed
                 const winnersCount = interaction.options.getInteger("winners") || 1;
 
                 const gwEmbed = new EmbedBuilder().setTitle(`🎉 GIVEAWAY: ${prize} 🎉`).setDescription(`Click 🎉 to join!\n\n⏳ **Ends:** <t:${endTimestamp}:R>\n👥 **Winners:** ${winnersCount}`).setColor("#FFD700");
-
                 const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`gw_join_${interaction.id}`).setLabel("Enter (0)").setStyle(ButtonStyle.Primary).setEmoji("🎉"));
 
                 const gwMessage = await interaction.channel.send({ embeds: [gwEmbed], components: [row] });
@@ -225,7 +231,8 @@ client.on("interactionCreate", async (interaction) => {
                 }
                 
                 const ticket = await createTicket(interaction, "gwclaim", CATEGORIES.giveaway);
-                await ticket.send({ content: `${interaction.user} | <@&${ROLES.staff}>`, embeds: [new EmbedBuilder().setTitle("🎁 Giveaway Claim").setDescription("Please wait for a staff member to assist you with your prize.")], components: [createTicketButtons(interaction.user.id)] });
+                const qEmbed = getTicketQuestionsEmbed("gwclaim");
+                await ticket.send({ content: `${interaction.user} | <@&${ROLES.staff}>`, embeds: [qEmbed], components: [createTicketButtons(interaction.user.id)] });
                 sendLog(interaction.guild, "🎫 Ticket Opened", `**User:** ${interaction.user}\n**Type:** Giveaway Claim\n**Channel:** ${ticket}`);
                 return interaction.editReply(`✅ Claim ticket opened: ${ticket}`);
             }
@@ -239,7 +246,8 @@ client.on("interactionCreate", async (interaction) => {
                 if (type === "build") catId = CATEGORIES.build;
 
                 const ticket = await createTicket(interaction, type, catId);
-                await ticket.send({ content: `${interaction.user} | <@&${ROLES.staff}>`, components: [createTicketButtons(interaction.user.id)] });
+                const qEmbed = getTicketQuestionsEmbed(type);
+                await ticket.send({ content: `${interaction.user} | <@&${ROLES.staff}>`, embeds: [qEmbed], components: [createTicketButtons(interaction.user.id)] });
                 sendLog(interaction.guild, "🎫 Ticket Opened", `**User:** ${interaction.user}\n**Type:** ${type}\n**Channel:** ${ticket}`);
                 return interaction.editReply(`✅ Ticket opened: ${ticket}`);
             }
@@ -299,7 +307,8 @@ client.on("interactionCreate", async (interaction) => {
             if (choice === "Giveaways") catId = CATEGORIES.giveaway;
 
             const ticket = await createTicket(interaction, choice, catId);
-            await ticket.send({ content: `${interaction.user} | <@&${ROLES.staff}>`, components: [createTicketButtons(interaction.user.id)] });
+            const qEmbed = getTicketQuestionsEmbed(choice);
+            await ticket.send({ content: `${interaction.user} | <@&${ROLES.staff}>`, embeds: [qEmbed], components: [createTicketButtons(interaction.user.id)] });
             sendLog(interaction.guild, "🎫 Ticket Opened", `**User:** ${interaction.user}\n**Type:** ${choice}\n**Channel:** ${ticket}`);
             return interaction.editReply(`✅ Ticket opened: ${ticket}`);
         }
@@ -312,6 +321,35 @@ client.on("interactionCreate", async (interaction) => {
 // ==========================================
 // 🛠️ HELPER FUNCTIONS
 // ==========================================
+
+// 📝 CUSTOM DYNAMIC EMBED FOR TICKET QUESTIONS
+function getTicketQuestionsEmbed(type) {
+    const embed = new EmbedBuilder().setColor("#2F3136").setTimestamp();
+    const cleanType = type.toLowerCase();
+
+    if (cleanType === "gwclaim" || cleanType === "giveaways") {
+        embed.setTitle("🎉 Giveaway Ticket Initialization")
+             .setDescription("Please provide the answers to the questions below:\n\n1️⃣ **Who hosted?**\n2️⃣ **What did you win?**\n3️⃣ **Send proof in the ticket**");
+    } else if (cleanType === "partnership") {
+        embed.setTitle("🤝 Partner Ticket Initialization")
+             .setDescription("Please provide the answers to the questions below:\n\n1️⃣ **How many members?**\n2️⃣ **Have you read our req?**\n3️⃣ **Send ad in the ticket**");
+    } else if (cleanType === "market" || cleanType === "digging") {
+        embed.setTitle("🛒 Market Ticket Initialization")
+             .setDescription("Please provide the answers to the questions below:\n\n1️⃣ **Are you buying or selling?**\n2️⃣ **What are you buying or selling?**\n3️⃣ **How much per?**");
+    } else if (cleanType === "support" || cleanType === "build") {
+        embed.setTitle("🛠️ Support Ticket Initialization")
+             .setDescription("Please provide the answers to the questions below:\n\n1️⃣ **What do you need help with?**\n2️⃣ **How do you want us to help?**\n3️⃣ **What is your ign and bal?**");
+    } else if (cleanType === "middleman") {
+        embed.setTitle("⚖️ Middleman Ticket Initialization")
+             .setDescription("Please detail your complete trade arrangements below while we request an available Middleman.");
+    } else {
+        embed.setTitle("🎫 Ticket Open")
+             .setDescription("Please wait patiently for assistance. State your inquiry directly below.");
+    }
+
+    return embed;
+}
+
 async function handleDMApplication(user, type, guild) {
     try {
         const questions = APP_QUESTIONS[type];
@@ -355,7 +393,6 @@ async function createTicket(interaction, type, categoryId) {
     });
 }
 
-// Global UI Buttons for Tickets
 function createTicketButtons(userId) {
     return new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`claim_${userId}`).setLabel("Claim").setStyle(ButtonStyle.Primary),
